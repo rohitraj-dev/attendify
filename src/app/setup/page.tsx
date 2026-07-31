@@ -33,28 +33,55 @@ type DraftHoliday = {
   reason: string;
 };
 
-const TOTAL_STEPS = 4;
+type ParsedSlot = {
+  id: string;
+  subject_code: string;
+  teacher_initials: string;
+  room: string;
+  day: number;
+  start_time: string;
+  end_time: string;
+  checked: boolean;
+};
+
+const TOTAL_STEPS = 5;
 
 const stepLabels = [
   "Create Semester",
-  "Upload Timetable Photo",
+  "Select Branch",
+  "Upload Timetable",
   "Upload Holiday List",
   "Done",
 ];
 
+const dayLabels = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+];
+
+const branches = ["BBA", "BCA", "BSc AIML", "BSc M&C"] as const;
+
 export default function SetupPage() {
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSavingSemester, setIsSavingSemester] = useState(false);
+  const [isParsingTimetable, setIsParsingTimetable] = useState(false);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isSavingHolidays, setIsSavingHolidays] = useState(false);
 
   const [semesterName, setSemesterName] = useState("");
   const [semesterStartDate, setSemesterStartDate] = useState("");
   const [semesterEndDate, setSemesterEndDate] = useState("");
   const [savedSemester, setSavedSemester] = useState<SemesterInsert | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
 
+  const [timetableFile, setTimetableFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [parsedSlots, setParsedSlots] = useState<ParsedSlot[]>([]);
 
   const [holidayDate, setHolidayDate] = useState("");
   const [holidayReason, setHolidayReason] = useState("");
@@ -102,7 +129,9 @@ export default function SetupPage() {
     const file = event.target.files?.[0];
 
     if (!file) {
+      setTimetableFile(null);
       setPreviewUrl(null);
+      setParsedSlots([]);
       return;
     }
 
@@ -112,7 +141,134 @@ export default function SetupPage() {
       URL.revokeObjectURL(previewUrl);
     }
 
+    setTimetableFile(file);
     setPreviewUrl(nextPreviewUrl);
+    setParsedSlots([]);
+  }
+
+  async function handleParseTimetable() {
+    if (!timetableFile) {
+      toast.error("Select a timetable image first");
+      return;
+    }
+
+    setIsParsingTimetable(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", timetableFile);
+      formData.append("branch", selectedBranch ?? "");
+
+      const response = await fetch("/api/parse-timetable", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as
+        | {
+            success: true;
+            slots: Array<{
+              subject_code: string;
+              teacher_initials: string;
+              room: string;
+              day: number;
+              start_time: string;
+              end_time: string;
+            }>;
+          }
+        | { success: false; error: string };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(
+          payload.success ? "Failed to parse timetable" : payload.error
+        );
+      }
+
+      setParsedSlots(
+        payload.slots.map((slot) => ({
+          id: crypto.randomUUID(),
+          subject_code: slot.subject_code,
+          teacher_initials: slot.teacher_initials,
+          room: slot.room,
+          day: slot.day,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          checked: true,
+        }))
+      );
+      toast.success("Timetable parsed");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to parse timetable";
+      toast.error(message);
+    } finally {
+      setIsParsingTimetable(false);
+    }
+  }
+
+  function handleToggleParsedSlot(slotId: string) {
+    setParsedSlots((current) =>
+      current.map((slot) =>
+        slot.id === slotId ? { ...slot, checked: !slot.checked } : slot
+      )
+    );
+  }
+
+  async function handleSaveSchedule() {
+    if (!savedSemester?.id) {
+      toast.error("Create a semester first");
+      return;
+    }
+
+    const selectedSlots = parsedSlots.filter((slot) => slot.checked);
+
+    if (!selectedSlots.length) {
+      toast.error("Select at least one parsed slot");
+      return;
+    }
+
+    setIsSavingSchedule(true);
+
+    try {
+      for (const slot of selectedSlots) {
+        const { data: subject, error: subjectError } = await supabase
+          .from("subjects")
+          .upsert(
+            {
+              name: slot.subject_code,
+              code: slot.subject_code,
+              min_attendance_percent: 75,
+              semester_id: savedSemester.id,
+            },
+            { onConflict: "semester_id,code" }
+          )
+          .select("id")
+          .single();
+
+        if (subjectError) {
+          throw subjectError;
+        }
+
+        const { error: slotError } = await supabase.from("schedule_slots").insert({
+          subject_id: subject.id,
+          day_of_week: slot.day + 1,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+        });
+
+        if (slotError) {
+          throw slotError;
+        }
+      }
+
+      toast.success("Schedule saved");
+      setCurrentStep(4);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save schedule";
+      toast.error(message);
+    } finally {
+      setIsSavingSchedule(false);
+    }
   }
 
   function handleAddHoliday(event: React.FormEvent<HTMLFormElement>) {
@@ -149,19 +305,20 @@ export default function SetupPage() {
     setIsSavingHolidays(true);
 
     try {
-      const { error } = await supabase.from("holidays").insert(
+      const { error } = await supabase.from("holidays").upsert(
         holidays.map((holiday) => ({
           semester_id: savedSemester.id,
           date: holiday.date,
           reason: holiday.reason,
-        }))
+        })),
+        { onConflict: "semester_id,date", ignoreDuplicates: true }
       );
 
       if (error) {
         throw error;
       }
 
-      setCurrentStep(4);
+      setCurrentStep(5);
       toast.success("Holidays saved");
     } catch (error) {
       const message =
@@ -278,9 +435,59 @@ export default function SetupPage() {
         {currentStep === 2 && (
           <Card className="bg-white">
             <CardHeader>
-              <CardTitle>Upload Timetable Photo</CardTitle>
+              <CardTitle>Select Branch</CardTitle>
               <CardDescription>
-                Upload a photo now. OCR parsing will be added next.
+                Choose the branch to extract from the timetable image.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              {branches.map((branch) => {
+                const isSelected = selectedBranch === branch;
+
+                return (
+                  <button
+                    key={branch}
+                    type="button"
+                    onClick={() => setSelectedBranch(branch)}
+                    className={`rounded-xl border p-5 text-left transition-colors ${
+                      isSelected
+                        ? "border-zinc-950 bg-zinc-950 text-white"
+                        : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+                    }`}
+                  >
+                    <p className="text-base font-semibold">{branch}</p>
+                    <p
+                      className={`mt-1 text-sm ${
+                        isSelected ? "text-zinc-200" : "text-zinc-500"
+                      }`}
+                    >
+                      Extract only classes for {branch}.
+                    </p>
+                  </button>
+                );
+              })}
+            </CardContent>
+            <CardFooter className="justify-between gap-3">
+              <Button variant="outline" onClick={() => setCurrentStep(1)}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                disabled={!selectedBranch}
+                onClick={() => setCurrentStep(3)}
+              >
+                Continue
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {currentStep === 3 && (
+          <Card className="bg-white">
+            <CardHeader>
+              <CardTitle>Upload Timetable</CardTitle>
+              <CardDescription>
+                Upload a timetable photo, parse it, then save the detected slots.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -308,29 +515,86 @@ export default function SetupPage() {
                   Upload an image to preview it here.
                 </div>
               )}
+
+              {parsedSlots.length ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-medium">Parsed slots</h2>
+                    <Badge variant="outline">
+                      {parsedSlots.filter((slot) => slot.checked).length} selected
+                    </Badge>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-zinc-200">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-zinc-50 text-zinc-600">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Use</th>
+                          <th className="px-4 py-3 font-medium">Subject</th>
+                          <th className="px-4 py-3 font-medium">Code</th>
+                          <th className="px-4 py-3 font-medium">Day</th>
+                          <th className="px-4 py-3 font-medium">Start</th>
+                          <th className="px-4 py-3 font-medium">End</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parsedSlots.map((slot) => (
+                          <tr key={slot.id} className="border-t border-zinc-200">
+                            <td className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={slot.checked}
+                                onChange={() => handleToggleParsedSlot(slot.id)}
+                                className="h-4 w-4 rounded border-zinc-300"
+                              />
+                            </td>
+                            <td className="px-4 py-3">{slot.subject_code}</td>
+                            <td className="px-4 py-3">{slot.subject_code}</td>
+                            <td className="px-4 py-3">
+                              {dayLabels[slot.day] ?? `Day ${slot.day}`}
+                            </td>
+                            <td className="px-4 py-3">{slot.start_time}</td>
+                            <td className="px-4 py-3">{slot.end_time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
             <CardFooter className="justify-between gap-3">
-              <Button variant="outline" onClick={() => setCurrentStep(1)}>
+              <Button variant="outline" onClick={() => setCurrentStep(2)}>
                 Back
               </Button>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap justify-end gap-3">
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={!previewUrl}
-                  onClick={() => toast.info("OCR coming soon")}
+                  onClick={() => setCurrentStep(4)}
                 >
-                  Parse Timetable
+                  Skip
                 </Button>
-                <Button type="button" onClick={() => setCurrentStep(3)}>
-                  Continue
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!previewUrl || isParsingTimetable}
+                  onClick={() => void handleParseTimetable()}
+                >
+                  {isParsingTimetable ? "Parsing..." : "Parse Timetable"}
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!parsedSlots.length || isSavingSchedule}
+                  onClick={() => void handleSaveSchedule()}
+                >
+                  {isSavingSchedule ? "Saving..." : "Save Schedule"}
                 </Button>
               </div>
             </CardFooter>
           </Card>
         )}
 
-        {currentStep === 3 && (
+        {currentStep === 4 && (
           <Card className="bg-white">
             <CardHeader>
               <CardTitle>Upload Holiday List</CardTitle>
@@ -401,7 +665,7 @@ export default function SetupPage() {
               </div>
             </CardContent>
             <CardFooter className="justify-between gap-3">
-              <Button variant="outline" onClick={() => setCurrentStep(2)}>
+              <Button variant="outline" onClick={() => setCurrentStep(3)}>
                 Back
               </Button>
               <Button onClick={handleSaveHolidays} disabled={isSavingHolidays}>
@@ -411,7 +675,7 @@ export default function SetupPage() {
           </Card>
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 5 && (
           <Card className="bg-white">
             <CardHeader>
               <CardTitle>Done</CardTitle>
@@ -434,12 +698,16 @@ export default function SetupPage() {
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                <p className="text-sm text-zinc-500">Branch</p>
+                <p className="mt-1 font-medium">{selectedBranch ?? "-"}</p>
+              </div>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-sm text-zinc-500">Holidays</p>
                 <p className="mt-1 font-medium">{holidays.length}</p>
               </div>
             </CardContent>
             <CardFooter className="justify-between gap-3">
-              <Button variant="outline" onClick={() => setCurrentStep(3)}>
+              <Button variant="outline" onClick={() => setCurrentStep(4)}>
                 Back
               </Button>
               <Button asChild>

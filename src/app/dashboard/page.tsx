@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,16 +25,15 @@ type SlotRow = {
   id: string;
   start_time: string;
   end_time: string;
+  subject_code?: string;
   subjects:
     | {
         name: string;
         code: string;
-        min_attendance_percent: number;
       }
     | {
         name: string;
         code: string;
-        min_attendance_percent: number;
       }[];
 };
 
@@ -88,8 +87,14 @@ function getBadgeClassName(status: DashboardClass["status"]) {
   return "bg-zinc-200 text-zinc-700";
 }
 
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
 export default function DashboardPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
+  const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
   const [activeSemester, setActiveSemester] = useState<ActiveSemester | null>(
     null
@@ -99,11 +104,69 @@ export default function DashboardPage() {
   const [pendingSlotIds, setPendingSlotIds] = useState<string[]>([]);
 
   const today = new Date();
-  const todayDay = today.getDay();
+  const todayDayOfWeek = today.getDay();
   const todayIso = today.toISOString().split("T")[0];
   const headerDate = formatDisplayDate(today);
 
   useEffect(() => {
+    async function autoMarkPastSlots(slots: SlotRow[]) {
+      if (hasAutoMarked.current) {
+        return;
+      }
+
+      hasAutoMarked.current = true;
+
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const pastSlots = slots.filter(
+        (slot) => currentMinutes > timeToMinutes(slot.end_time)
+      );
+
+      if (!pastSlots.length) {
+        return;
+      }
+
+      const pastSlotIds = pastSlots.map((slot) => slot.id);
+      const { data: existingAttendance, error: existingAttendanceError } =
+        await supabase
+          .from("attendance_records")
+          .select("slot_id")
+          .eq("date", todayIso)
+          .in("slot_id", pastSlotIds);
+
+      if (existingAttendanceError) {
+        throw existingAttendanceError;
+      }
+
+      const existingSlotIds = new Set(
+        (existingAttendance ?? []).map((record) => record.slot_id)
+      );
+
+      const slotsToInsert = pastSlots
+        .filter((slot) => !existingSlotIds.has(slot.id))
+        .map((slot) => ({
+          slot_id: slot.id,
+          date: todayIso,
+          status: "present" as const,
+          marked_by: "auto" as const,
+        }));
+
+      if (!slotsToInsert.length) {
+        return;
+      }
+
+      const { error: insertError } = await supabase
+        .from("attendance_records")
+        .upsert(slotsToInsert, {
+          onConflict: "slot_id,date",
+          ignoreDuplicates: true,
+        });
+
+      if (insertError) {
+        throw insertError;
+      }
+    }
+
     async function loadDashboard() {
       setIsLoading(true);
       setError(null);
@@ -132,8 +195,8 @@ export default function DashboardPage() {
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
-          .select("*, subjects(name, code, min_attendance_percent)")
-          .eq("day_of_week", todayDay)
+          .select("*, subjects(name, code)")
+          .eq("day_of_week", todayDayOfWeek)
           .eq("subjects.semester_id", semester.id)
           .order("start_time", { ascending: true });
 
@@ -149,6 +212,8 @@ export default function DashboardPage() {
           setClasses([]);
           return;
         }
+
+        await autoMarkPastSlots(typedSlots);
 
         const slotIds = typedSlots.map((slot) => slot.id);
         const { data: attendanceRows, error: attendanceError } = await supabase
@@ -176,7 +241,9 @@ export default function DashboardPage() {
 
             return {
               id: slot.id,
-              subjectName: subject?.name ?? "Unnamed subject",
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              subjectName:
+                (slot.subjects as any)?.name ?? slot.subject_code ?? "Unnamed",
               subjectCode: subject?.code ?? "",
               timeRange: formatTimeRange(slot.start_time, slot.end_time),
               status:
@@ -189,6 +256,7 @@ export default function DashboardPage() {
           })
         );
       } catch (loadError) {
+        console.error("Failed to load dashboard:", loadError);
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -200,7 +268,7 @@ export default function DashboardPage() {
     }
 
     void loadDashboard();
-  }, [supabase, todayDay, todayIso]);
+  }, [supabase, todayDayOfWeek, todayIso]);
 
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
