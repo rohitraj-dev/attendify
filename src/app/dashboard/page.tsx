@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MoreVertical } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +13,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus } from "@/lib/types";
 
@@ -42,12 +60,23 @@ type AttendanceRow = {
   status: AttendanceStatus;
 };
 
+type DayOverride = {
+  id: string;
+  slot_id: string;
+  type: "cancelled" | "rescheduled";
+  new_time: string | null;
+};
+
 type DashboardClass = {
   id: string;
   subjectName: string;
   subjectCode: string;
   timeRange: string;
+  startTime: string;
+  endTime: string;
   status: "present" | "absent" | null;
+  overrideType?: "cancelled" | "rescheduled";
+  displayTime?: string;
 };
 
 function formatDisplayDate(date: Date) {
@@ -64,27 +93,45 @@ function formatTimeRange(startTime: string, endTime: string) {
   const start = new Date(`${referenceDate}T${startTime}`);
   const end = new Date(`${referenceDate}T${endTime}`);
 
-  return new Intl.DateTimeFormat("en-US", {
+  return `${new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
-  }).format(start) +
-    " - " +
-    new Intl.DateTimeFormat("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(end);
+  }).format(start)} - ${new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(end)}`;
 }
 
-function getBadgeClassName(status: DashboardClass["status"]) {
-  if (status === "present") {
+function getBadgeClassName(slot: DashboardClass) {
+  if (slot.overrideType === "cancelled") {
+    return "bg-zinc-200 text-zinc-700";
+  }
+
+  if (slot.overrideType === "rescheduled") {
+    return "bg-amber-100 text-amber-700";
+  }
+
+  if (slot.status === "present") {
     return "bg-emerald-100 text-emerald-700";
   }
 
-  if (status === "absent") {
+  if (slot.status === "absent") {
     return "bg-red-100 text-red-700";
   }
 
   return "bg-zinc-200 text-zinc-700";
+}
+
+function getBadgeLabel(slot: DashboardClass) {
+  if (slot.overrideType === "cancelled") {
+    return "Cancelled";
+  }
+
+  if (slot.overrideType === "rescheduled") {
+    return "Rescheduled";
+  }
+
+  return slot.status === "present" ? "Present" : "Absent";
 }
 
 function timeToMinutes(time: string) {
@@ -96,12 +143,15 @@ export default function DashboardPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
+  const [overrides, setOverrides] = useState<Record<string, DayOverride>>({});
   const [activeSemester, setActiveSemester] = useState<ActiveSemester | null>(
     null
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingSlotIds, setPendingSlotIds] = useState<string[]>([]);
+  const [rescheduleSlotId, setRescheduleSlotId] = useState<string | null>(null);
+  const [rescheduleTime, setRescheduleTime] = useState("");
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
@@ -109,7 +159,10 @@ export default function DashboardPage() {
   const headerDate = formatDisplayDate(today);
 
   useEffect(() => {
-    async function autoMarkPastSlots(slots: SlotRow[]) {
+    async function autoMarkPastSlots(
+      slots: SlotRow[],
+      overrideMap: Record<string, DayOverride>
+    ) {
       if (hasAutoMarked.current) {
         return;
       }
@@ -118,9 +171,24 @@ export default function DashboardPage() {
 
       const now = new Date();
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const pastSlots = slots.filter(
-        (slot) => currentMinutes > timeToMinutes(slot.end_time)
-      );
+      const pastSlots = slots.filter((slot) => {
+        const override = overrideMap[slot.id];
+
+        if (override?.type === "cancelled") {
+          return false;
+        }
+
+        const effectiveStart = override?.type === "rescheduled" && override.new_time
+          ? override.new_time
+          : slot.start_time;
+        const duration = Math.max(
+          timeToMinutes(slot.end_time) - timeToMinutes(slot.start_time),
+          0
+        );
+        const effectiveEndMinutes = timeToMinutes(effectiveStart) + duration;
+
+        return currentMinutes > effectiveEndMinutes;
+      });
 
       if (!pastSlots.length) {
         return;
@@ -155,15 +223,15 @@ export default function DashboardPage() {
         return;
       }
 
-      const { error: insertError } = await supabase
+      const { error: upsertError } = await supabase
         .from("attendance_records")
         .upsert(slotsToInsert, {
           onConflict: "slot_id,date",
           ignoreDuplicates: true,
         });
 
-      if (insertError) {
-        throw insertError;
+      if (upsertError) {
+        throw upsertError;
       }
     }
 
@@ -188,6 +256,7 @@ export default function DashboardPage() {
         if (!semester) {
           setActiveSemester(null);
           setClasses([]);
+          setOverrides({});
           return;
         }
 
@@ -204,18 +273,36 @@ export default function DashboardPage() {
           throw slotsError;
         }
 
-        console.log(slotRows);
-
         const typedSlots = (slotRows ?? []) as SlotRow[];
 
         if (!typedSlots.length) {
           setClasses([]);
+          setOverrides({});
           return;
         }
 
-        await autoMarkPastSlots(typedSlots);
-
         const slotIds = typedSlots.map((slot) => slot.id);
+        const { data: overrideRows, error: overridesError } = await supabase
+          .from("day_overrides")
+          .select("id, slot_id, type, new_time")
+          .eq("date", todayIso)
+          .in("slot_id", slotIds);
+
+        if (overridesError) {
+          throw overridesError;
+        }
+
+        const overrideMap = Object.fromEntries(
+          ((overrideRows ?? []) as DayOverride[]).map((override) => [
+            override.slot_id,
+            override,
+          ])
+        );
+
+        setOverrides(overrideMap);
+
+        await autoMarkPastSlots(typedSlots, overrideMap);
+
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
           .select("slot_id, status")
@@ -238,20 +325,28 @@ export default function DashboardPage() {
             const subject = Array.isArray(slot.subjects)
               ? slot.subjects[0]
               : slot.subjects;
+            const override = overrideMap[slot.id];
 
             return {
               id: slot.id,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               subjectName:
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (slot.subjects as any)?.name ?? slot.subject_code ?? "Unnamed",
               subjectCode: subject?.code ?? "",
               timeRange: formatTimeRange(slot.start_time, slot.end_time),
+              startTime: slot.start_time,
+              endTime: slot.end_time,
               status:
                 attendanceMap.get(slot.id) === "present"
                   ? "present"
                   : attendanceMap.has(slot.id)
                     ? "absent"
                     : null,
+              overrideType: override?.type,
+              displayTime:
+                override?.type === "rescheduled" && override.new_time
+                  ? formatTimeRange(override.new_time, slot.end_time)
+                  : undefined,
             };
           })
         );
@@ -273,7 +368,7 @@ export default function DashboardPage() {
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
-    if (!currentClass) {
+    if (!currentClass || currentClass.overrideType === "cancelled") {
       return;
     }
 
@@ -318,6 +413,176 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleCancelClass(slotId: string) {
+    const targetClass = classes.find((item) => item.id === slotId);
+
+    if (!targetClass) {
+      return;
+    }
+
+    setPendingSlotIds((current) => [...current, slotId]);
+
+    try {
+      const { data: overrideRow, error: overrideError } = await supabase
+        .from("day_overrides")
+        .upsert(
+          {
+            slot_id: slotId,
+            date: todayIso,
+            type: "cancelled",
+            new_time: null,
+          },
+          { onConflict: "slot_id,date" }
+        )
+        .select("id, slot_id, type, new_time")
+        .single();
+
+      if (overrideError) {
+        throw overrideError;
+      }
+
+      const { error: attendanceError } = await supabase
+        .from("attendance_records")
+        .upsert(
+          {
+            slot_id: slotId,
+            date: todayIso,
+            status: "cancelled",
+            marked_by: "manual",
+          },
+          { onConflict: "slot_id,date" }
+        );
+
+      if (attendanceError) {
+        throw attendanceError;
+      }
+
+      setOverrides((current) => ({
+        ...current,
+        [slotId]: overrideRow as DayOverride,
+      }));
+      setClasses((current) =>
+        current.map((item) =>
+          item.id === slotId
+            ? { ...item, overrideType: "cancelled", status: null, displayTime: undefined }
+            : item
+        )
+      );
+      toast.success("Class cancelled");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to cancel class"
+      );
+    } finally {
+      setPendingSlotIds((current) => current.filter((id) => id !== slotId));
+    }
+  }
+
+  async function handleRescheduleClass(slotId: string, newTime: string) {
+    const targetClass = classes.find((item) => item.id === slotId);
+
+    if (!targetClass) {
+      return;
+    }
+
+    setPendingSlotIds((current) => [...current, slotId]);
+
+    try {
+      const { data: overrideRow, error: overrideError } = await supabase
+        .from("day_overrides")
+        .upsert(
+          {
+            slot_id: slotId,
+            date: todayIso,
+            type: "rescheduled",
+            new_time: newTime,
+          },
+          { onConflict: "slot_id,date" }
+        )
+        .select("id, slot_id, type, new_time")
+        .single();
+
+      if (overrideError) {
+        throw overrideError;
+      }
+
+      setOverrides((current) => ({
+        ...current,
+        [slotId]: overrideRow as DayOverride,
+      }));
+      setClasses((current) =>
+        current.map((item) =>
+          item.id === slotId
+            ? {
+                ...item,
+                overrideType: "rescheduled",
+                displayTime: formatTimeRange(newTime, item.endTime),
+              }
+            : item
+        )
+      );
+      setRescheduleSlotId(null);
+      setRescheduleTime("");
+      toast.success("Class rescheduled");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to reschedule class"
+      );
+    } finally {
+      setPendingSlotIds((current) => current.filter((id) => id !== slotId));
+    }
+  }
+
+  async function handleRemoveOverride(slotId: string) {
+    const targetClass = classes.find((item) => item.id === slotId);
+    const currentOverride = overrides[slotId];
+
+    if (!targetClass || !currentOverride) {
+      return;
+    }
+
+    setPendingSlotIds((current) => [...current, slotId]);
+
+    try {
+      const { error: deleteError } = await supabase
+        .from("day_overrides")
+        .delete()
+        .eq("id", currentOverride.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      setOverrides((current) => {
+        const next = { ...current };
+        delete next[slotId];
+        return next;
+      });
+      setClasses((current) =>
+        current.map((item) =>
+          item.id === slotId
+            ? {
+                ...item,
+                overrideType: undefined,
+                displayTime: undefined,
+              }
+            : item
+        )
+      );
+      toast.success("Override removed");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to remove override"
+      );
+    } finally {
+      setPendingSlotIds((current) => current.filter((id) => id !== slotId));
+    }
+  }
+
+  const selectedRescheduleClass = classes.find(
+    (item) => item.id === rescheduleSlotId
+  );
+
   return (
     <div className="min-h-screen bg-zinc-50 px-4 py-8 text-zinc-950">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -355,41 +620,95 @@ export default function DashboardPage() {
           <div className="grid gap-4">
             {classes.map((slot) => {
               const isPending = pendingSlotIds.includes(slot.id);
-              const statusLabel = slot.status === "present" ? "Present" : "Absent";
 
               return (
                 <Card key={slot.id} className="bg-white">
                   <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
                     <div className="space-y-1">
-                      <CardTitle>{slot.subjectName}</CardTitle>
+                      <CardTitle
+                        className={
+                          slot.overrideType === "cancelled" ? "line-through text-zinc-400" : ""
+                        }
+                      >
+                        {slot.subjectName}
+                      </CardTitle>
                       <CardDescription>
                         {slot.subjectCode ? `${slot.subjectCode} • ` : ""}
-                        {slot.timeRange}
+                        {slot.overrideType === "rescheduled" && slot.displayTime
+                          ? slot.displayTime
+                          : slot.timeRange}
                       </CardDescription>
                     </div>
-                    <Badge className={getBadgeClassName(slot.status)}>
-                      {statusLabel}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className={getBadgeClassName(slot)}>
+                        {getBadgeLabel(slot)}
+                      </Badge>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" type="button">
+                            <MoreVertical />
+                            <span className="sr-only">Open slot actions</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {slot.overrideType ? (
+                            <>
+                              <DropdownMenuItem
+                                onSelect={() => void handleRemoveOverride(slot.id)}
+                              >
+                                Remove Override
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          ) : null}
+                          <DropdownMenuItem
+                            onSelect={() => void handleCancelClass(slot.id)}
+                          >
+                            Cancel Class
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRescheduleSlotId(slot.id);
+                              setRescheduleTime(slot.startTime);
+                            }}
+                          >
+                            Reschedule
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-zinc-600">
-                      {slot.status === null
-                        ? "No attendance record yet. Default view is absent."
-                        : "Attendance marked for today."}
-                    </p>
-                    <Button
-                      type="button"
-                      variant={slot.status === "present" ? "destructive" : "default"}
-                      disabled={isPending}
-                      onClick={() => void handleToggleAttendance(slot.id)}
-                      className="w-full sm:w-auto"
+                    <p
+                      className={`text-sm ${
+                        slot.overrideType === "cancelled"
+                          ? "text-zinc-400 line-through"
+                          : "text-zinc-600"
+                      }`}
                     >
-                      {isPending
-                        ? "Saving..."
-                        : slot.status === "present"
-                          ? "Mark Absent"
-                          : "Mark Present"}
-                    </Button>
+                      {slot.overrideType === "cancelled"
+                        ? "This class is cancelled for today."
+                        : slot.overrideType === "rescheduled"
+                          ? "This class has a new time for today."
+                          : slot.status === null
+                            ? "No attendance record yet. Default view is absent."
+                            : "Attendance marked for today."}
+                    </p>
+                    {slot.overrideType !== "cancelled" ? (
+                      <Button
+                        type="button"
+                        variant={slot.status === "present" ? "destructive" : "default"}
+                        disabled={isPending}
+                        onClick={() => void handleToggleAttendance(slot.id)}
+                        className="w-full sm:w-auto"
+                      >
+                        {isPending
+                          ? "Saving..."
+                          : slot.status === "present"
+                            ? "Mark Absent"
+                            : "Mark Present"}
+                      </Button>
+                    ) : null}
                   </CardContent>
                 </Card>
               );
@@ -403,6 +722,43 @@ export default function DashboardPage() {
           </Card>
         )}
       </div>
+
+      <Dialog
+        open={rescheduleSlotId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRescheduleSlotId(null);
+            setRescheduleTime("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reschedule Class</DialogTitle>
+            <DialogDescription>
+              Pick a new start time for {selectedRescheduleClass?.subjectName ?? "this class"}.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="time"
+            value={rescheduleTime}
+            onChange={(event) => setRescheduleTime(event.target.value)}
+          />
+          <DialogFooter showCloseButton>
+            <Button
+              type="button"
+              disabled={!rescheduleSlotId || !rescheduleTime}
+              onClick={() =>
+                rescheduleSlotId
+                  ? void handleRescheduleClass(rescheduleSlotId, rescheduleTime)
+                  : undefined
+              }
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
