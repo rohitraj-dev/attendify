@@ -29,6 +29,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus } from "@/lib/types";
 
@@ -77,6 +79,17 @@ type DashboardClass = {
   status: "present" | "absent" | null;
   overrideType?: "cancelled" | "rescheduled";
   displayTime?: string;
+};
+
+type SubjectStat = {
+  id: string;
+  name: string;
+  code: string;
+  minAttendancePercent: number;
+  totalHeld: number;
+  attended: number;
+  percentage: number | null;
+  canMiss: number;
 };
 
 function formatDisplayDate(date: Date) {
@@ -134,6 +147,21 @@ function getBadgeLabel(slot: DashboardClass) {
   return slot.status === "present" ? "Present" : "Absent";
 }
 
+function getProgressClass(
+  percentage: number | null,
+  minAttendancePercent: number
+) {
+  if (percentage === null || percentage >= minAttendancePercent) {
+    return "[&_[data-slot=progress-indicator]]:bg-emerald-500";
+  }
+
+  if (percentage >= minAttendancePercent - 5) {
+    return "[&_[data-slot=progress-indicator]]:bg-amber-500";
+  }
+
+  return "[&_[data-slot=progress-indicator]]:bg-red-500";
+}
+
 function timeToMinutes(time: string) {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
@@ -143,6 +171,7 @@ export default function DashboardPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
+  const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
   const [overrides, setOverrides] = useState<Record<string, DayOverride>>({});
   const [activeSemester, setActiveSemester] = useState<ActiveSemester | null>(
     null
@@ -178,9 +207,10 @@ export default function DashboardPage() {
           return false;
         }
 
-        const effectiveStart = override?.type === "rescheduled" && override.new_time
-          ? override.new_time
-          : slot.start_time;
+        const effectiveStart =
+          override?.type === "rescheduled" && override.new_time
+            ? override.new_time
+            : slot.start_time;
         const duration = Math.max(
           timeToMinutes(slot.end_time) - timeToMinutes(slot.start_time),
           0
@@ -235,6 +265,114 @@ export default function DashboardPage() {
       }
     }
 
+    async function loadStats(activeSemesterId: string) {
+      const { data: subjects, error: subjectsError } = await supabase
+        .from("subjects")
+        .select("id, name, code, min_attendance_percent")
+        .eq("semester_id", activeSemesterId);
+
+      if (subjectsError) {
+        throw subjectsError;
+      }
+
+      const typedSubjects =
+        (subjects as
+          | Array<{
+              id: string;
+              name: string;
+              code: string;
+              min_attendance_percent: number;
+            }>
+          | null) ?? [];
+
+      if (!typedSubjects.length) {
+        setSubjectStats([]);
+        return;
+      }
+
+      const subjectIds = typedSubjects.map((subject) => subject.id);
+      const { data: statSlots, error: statSlotsError } = await supabase
+        .from("schedule_slots")
+        .select("id, subject_id")
+        .in("subject_id", subjectIds);
+
+      if (statSlotsError) {
+        throw statSlotsError;
+      }
+
+      const typedStatSlots =
+        (statSlots as Array<{ id: string; subject_id: string }> | null) ?? [];
+      const statSlotIds = typedStatSlots.map((slot) => slot.id);
+
+      if (!statSlotIds.length) {
+        setSubjectStats(
+          typedSubjects.map((subject) => ({
+            id: subject.id,
+            name: subject.name,
+            code: subject.code,
+            minAttendancePercent: subject.min_attendance_percent,
+            totalHeld: 0,
+            attended: 0,
+            percentage: null,
+            canMiss: 0,
+          }))
+        );
+        return;
+      }
+
+      const { data: statAttendance, error: statAttendanceError } = await supabase
+        .from("attendance_records")
+        .select("slot_id, status")
+        .in("slot_id", statSlotIds)
+        .lte("date", todayIso);
+
+      if (statAttendanceError) {
+        throw statAttendanceError;
+      }
+
+      const allAttendance = (statAttendance as AttendanceRow[] | null) ?? [];
+      const slotIdsBySubject = new Map<string, string[]>();
+
+      for (const slot of typedStatSlots) {
+        const current = slotIdsBySubject.get(slot.subject_id) ?? [];
+        current.push(slot.id);
+        slotIdsBySubject.set(slot.subject_id, current);
+      }
+
+      setSubjectStats(
+        typedSubjects.map((subject) => {
+          const subjectSlotIds = slotIdsBySubject.get(subject.id) ?? [];
+          const subjectAttendance = allAttendance.filter((record) =>
+            subjectSlotIds.includes(record.slot_id)
+          );
+          const effectiveAttendance = subjectAttendance.filter(
+            (record) =>
+              record.status === "present" || record.status === "absent"
+          );
+          const totalHeld = effectiveAttendance.length;
+          const attended = effectiveAttendance.filter(
+            (record) => record.status === "present"
+          ).length;
+          const percentage =
+            totalHeld > 0 ? Math.round((attended / totalHeld) * 100) : null;
+          const canMiss =
+            Math.floor(attended / (subject.min_attendance_percent / 100)) -
+            totalHeld;
+
+          return {
+            id: subject.id,
+            name: subject.name,
+            code: subject.code,
+            minAttendancePercent: subject.min_attendance_percent,
+            totalHeld,
+            attended,
+            percentage,
+            canMiss,
+          };
+        })
+      );
+    }
+
     async function loadDashboard() {
       setIsLoading(true);
       setError(null);
@@ -256,11 +394,13 @@ export default function DashboardPage() {
         if (!semester) {
           setActiveSemester(null);
           setClasses([]);
+          setSubjectStats([]);
           setOverrides({});
           return;
         }
 
         setActiveSemester(semester);
+        await loadStats(semester.id);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -464,14 +604,21 @@ export default function DashboardPage() {
       setClasses((current) =>
         current.map((item) =>
           item.id === slotId
-            ? { ...item, overrideType: "cancelled", status: null, displayTime: undefined }
+            ? {
+                ...item,
+                overrideType: "cancelled",
+                status: null,
+                displayTime: undefined,
+              }
             : item
         )
       );
       toast.success("Class cancelled");
-    } catch (error) {
+    } catch (actionError) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to cancel class"
+        actionError instanceof Error
+          ? actionError.message
+          : "Failed to cancel class"
       );
     } finally {
       setPendingSlotIds((current) => current.filter((id) => id !== slotId));
@@ -524,9 +671,11 @@ export default function DashboardPage() {
       setRescheduleSlotId(null);
       setRescheduleTime("");
       toast.success("Class rescheduled");
-    } catch (error) {
+    } catch (actionError) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to reschedule class"
+        actionError instanceof Error
+          ? actionError.message
+          : "Failed to reschedule class"
       );
     } finally {
       setPendingSlotIds((current) => current.filter((id) => id !== slotId));
@@ -534,10 +683,9 @@ export default function DashboardPage() {
   }
 
   async function handleRemoveOverride(slotId: string) {
-    const targetClass = classes.find((item) => item.id === slotId);
     const currentOverride = overrides[slotId];
 
-    if (!targetClass || !currentOverride) {
+    if (!currentOverride) {
       return;
     }
 
@@ -570,9 +718,11 @@ export default function DashboardPage() {
         )
       );
       toast.success("Override removed");
-    } catch (error) {
+    } catch (actionError) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to remove override"
+        actionError instanceof Error
+          ? actionError.message
+          : "Failed to remove override"
       );
     } finally {
       setPendingSlotIds((current) => current.filter((id) => id !== slotId));
@@ -595,132 +745,208 @@ export default function DashboardPage() {
           </h1>
         </div>
 
-        {error ? (
-          <Card className="bg-white">
-            <CardContent className="pt-6">
-              <p className="text-sm text-red-600">{error}</p>
-            </CardContent>
-          </Card>
-        ) : null}
+        <Tabs defaultValue="today" className="gap-4">
+          <TabsList>
+            <TabsTrigger value="today">Today</TabsTrigger>
+            <TabsTrigger value="stats">Stats</TabsTrigger>
+          </TabsList>
 
-        {isLoading ? (
-          <div className="grid gap-4">
-            {[1, 2].map((item) => (
-              <Card key={item} className="bg-white">
+          <TabsContent value="today" className="space-y-4">
+            {error ? (
+              <Card className="bg-white">
                 <CardContent className="pt-6">
-                  <div className="space-y-3">
-                    <div className="h-5 w-40 rounded bg-zinc-200" />
-                    <div className="h-4 w-28 rounded bg-zinc-100" />
-                  </div>
+                  <p className="text-sm text-red-600">{error}</p>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        ) : classes.length ? (
-          <div className="grid gap-4">
-            {classes.map((slot) => {
-              const isPending = pendingSlotIds.includes(slot.id);
+            ) : null}
 
-              return (
-                <Card key={slot.id} className="bg-white">
-                  <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-1">
-                      <CardTitle
-                        className={
-                          slot.overrideType === "cancelled" ? "line-through text-zinc-400" : ""
-                        }
-                      >
-                        {slot.subjectName}
-                      </CardTitle>
-                      <CardDescription>
-                        {slot.subjectCode ? `${slot.subjectCode} • ` : ""}
-                        {slot.overrideType === "rescheduled" && slot.displayTime
-                          ? slot.displayTime
-                          : slot.timeRange}
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className={getBadgeClassName(slot)}>
-                        {getBadgeLabel(slot)}
-                      </Badge>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" type="button">
-                            <MoreVertical />
-                            <span className="sr-only">Open slot actions</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {slot.overrideType ? (
-                            <>
+            {isLoading ? (
+              <div className="grid gap-4">
+                {[1, 2].map((item) => (
+                  <Card key={item} className="bg-white">
+                    <CardContent className="pt-6">
+                      <div className="space-y-3">
+                        <div className="h-5 w-40 rounded bg-zinc-200" />
+                        <div className="h-4 w-28 rounded bg-zinc-100" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : classes.length ? (
+              <div className="grid gap-4">
+                {classes.map((slot) => {
+                  const isPending = pendingSlotIds.includes(slot.id);
+
+                  return (
+                    <Card key={slot.id} className="bg-white">
+                      <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <CardTitle
+                            className={
+                              slot.overrideType === "cancelled"
+                                ? "line-through text-zinc-400"
+                                : ""
+                            }
+                          >
+                            {slot.subjectName}
+                          </CardTitle>
+                          <CardDescription>
+                            {slot.subjectCode ? `${slot.subjectCode} • ` : ""}
+                            {slot.overrideType === "rescheduled" && slot.displayTime
+                              ? slot.displayTime
+                              : slot.timeRange}
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className={getBadgeClassName(slot)}>
+                            {getBadgeLabel(slot)}
+                          </Badge>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon-sm" type="button">
+                                <MoreVertical />
+                                <span className="sr-only">Open slot actions</span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {slot.overrideType ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onSelect={() => void handleRemoveOverride(slot.id)}
+                                  >
+                                    Remove Override
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                </>
+                              ) : null}
                               <DropdownMenuItem
-                                onSelect={() => void handleRemoveOverride(slot.id)}
+                                onSelect={() => void handleCancelClass(slot.id)}
                               >
-                                Remove Override
+                                Cancel Class
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                            </>
-                          ) : null}
-                          <DropdownMenuItem
-                            onSelect={() => void handleCancelClass(slot.id)}
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setRescheduleSlotId(slot.id);
+                                  setRescheduleTime(slot.startTime);
+                                }}
+                              >
+                                Reschedule
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p
+                          className={`text-sm ${
+                            slot.overrideType === "cancelled"
+                              ? "text-zinc-400 line-through"
+                              : "text-zinc-600"
+                          }`}
+                        >
+                          {slot.overrideType === "cancelled"
+                            ? "This class is cancelled for today."
+                            : slot.overrideType === "rescheduled"
+                              ? "This class has a new time for today."
+                              : slot.status === null
+                                ? "No attendance record yet. Default view is absent."
+                                : "Attendance marked for today."}
+                        </p>
+                        {slot.overrideType !== "cancelled" ? (
+                          <Button
+                            type="button"
+                            variant={slot.status === "present" ? "destructive" : "default"}
+                            disabled={isPending}
+                            onClick={() => void handleToggleAttendance(slot.id)}
+                            className="w-full sm:w-auto"
                           >
-                            Cancel Class
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setRescheduleSlotId(slot.id);
-                              setRescheduleTime(slot.startTime);
-                            }}
+                            {isPending
+                              ? "Saving..."
+                              : slot.status === "present"
+                                ? "Mark Absent"
+                                : "Mark Present"}
+                          </Button>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card className="bg-white">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-zinc-600">No classes today</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="stats" className="space-y-4">
+            {subjectStats.length ? (
+              <div className="grid gap-4">
+                {subjectStats.map((subject) => (
+                  <Card key={subject.id} className="bg-white">
+                    <CardHeader>
+                      <CardTitle>{subject.name}</CardTitle>
+                      <CardDescription>{subject.code}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {subject.totalHeld === 0 ? (
+                        <p className="text-sm text-zinc-600">No classes held yet</p>
+                      ) : (
+                        <>
+                          <Progress
+                            value={subject.percentage ?? 0}
+                            className={getProgressClass(
+                              subject.percentage,
+                              subject.minAttendancePercent
+                            )}
+                          />
+                          <p className="text-sm text-zinc-600">
+                            {subject.percentage}% attendance ({subject.attended}/
+                            {subject.totalHeld} classes)
+                          </p>
+                          <p
+                            className={`text-sm font-medium ${
+                              subject.percentage !== null &&
+                              subject.percentage >= subject.minAttendancePercent &&
+                              subject.canMiss > 0
+                                ? "text-emerald-600"
+                                : subject.percentage !== null &&
+                                    subject.percentage >=
+                                      subject.minAttendancePercent &&
+                                    subject.canMiss === 0
+                                  ? "text-amber-600"
+                                  : "text-red-600"
+                            }`}
                           >
-                            Reschedule
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p
-                      className={`text-sm ${
-                        slot.overrideType === "cancelled"
-                          ? "text-zinc-400 line-through"
-                          : "text-zinc-600"
-                      }`}
-                    >
-                      {slot.overrideType === "cancelled"
-                        ? "This class is cancelled for today."
-                        : slot.overrideType === "rescheduled"
-                          ? "This class has a new time for today."
-                          : slot.status === null
-                            ? "No attendance record yet. Default view is absent."
-                            : "Attendance marked for today."}
-                    </p>
-                    {slot.overrideType !== "cancelled" ? (
-                      <Button
-                        type="button"
-                        variant={slot.status === "present" ? "destructive" : "default"}
-                        disabled={isPending}
-                        onClick={() => void handleToggleAttendance(slot.id)}
-                        className="w-full sm:w-auto"
-                      >
-                        {isPending
-                          ? "Saving..."
-                          : slot.status === "present"
-                            ? "Mark Absent"
-                            : "Mark Present"}
-                      </Button>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        ) : (
-          <Card className="bg-white">
-            <CardContent className="pt-6">
-              <p className="text-sm text-zinc-600">No classes today</p>
-            </CardContent>
-          </Card>
-        )}
+                            {subject.percentage !== null &&
+                            subject.percentage >= subject.minAttendancePercent &&
+                            subject.canMiss > 0
+                              ? `Can miss ${subject.canMiss} more classes`
+                              : subject.percentage !== null &&
+                                  subject.percentage >=
+                                    subject.minAttendancePercent &&
+                                  subject.canMiss === 0
+                                ? "On the edge — attend next class"
+                                : `Attend ${Math.abs(subject.canMiss)} classes to recover`}
+                          </p>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card className="bg-white">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-zinc-600">No subject stats available</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       <Dialog
@@ -736,7 +962,8 @@ export default function DashboardPage() {
           <DialogHeader>
             <DialogTitle>Reschedule Class</DialogTitle>
             <DialogDescription>
-              Pick a new start time for {selectedRescheduleClass?.subjectName ?? "this class"}.
+              Pick a new start time for{" "}
+              {selectedRescheduleClass?.subjectName ?? "this class"}.
             </DialogDescription>
           </DialogHeader>
           <Input
