@@ -39,6 +39,7 @@ const PHASE_ONE_USER_ID = "00000000-0000-0000-0000-000000000001";
 type ActiveSemester = {
   id: string;
   name: string;
+  end_date: string;
 };
 
 type SlotRow = {
@@ -90,6 +91,15 @@ type SubjectStat = {
   attended: number;
   percentage: number | null;
   canMiss: number;
+  remainingClasses: number;
+  bestCasePercent: number | null;
+  worstCasePercent: number | null;
+};
+
+type AlertItem = {
+  subjectName: string;
+  type: "danger" | "warning";
+  message: string;
 };
 
 function formatDisplayDate(date: Date) {
@@ -172,6 +182,7 @@ export default function DashboardPage() {
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [overrides, setOverrides] = useState<Record<string, DayOverride>>({});
   const [activeSemester, setActiveSemester] = useState<ActiveSemester | null>(
     null
@@ -181,6 +192,7 @@ export default function DashboardPage() {
   const [pendingSlotIds, setPendingSlotIds] = useState<string[]>([]);
   const [rescheduleSlotId, setRescheduleSlotId] = useState<string | null>(null);
   const [rescheduleTime, setRescheduleTime] = useState("");
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
@@ -265,11 +277,11 @@ export default function DashboardPage() {
       }
     }
 
-    async function loadStats(activeSemesterId: string) {
+    async function loadStats(activeSemester: ActiveSemester) {
       const { data: subjects, error: subjectsError } = await supabase
         .from("subjects")
         .select("id, name, code, min_attendance_percent")
-        .eq("semester_id", activeSemesterId);
+        .eq("semester_id", activeSemester.id);
 
       if (subjectsError) {
         throw subjectsError;
@@ -287,13 +299,14 @@ export default function DashboardPage() {
 
       if (!typedSubjects.length) {
         setSubjectStats([]);
+        setAlerts([]);
         return;
       }
 
       const subjectIds = typedSubjects.map((subject) => subject.id);
       const { data: statSlots, error: statSlotsError } = await supabase
         .from("schedule_slots")
-        .select("id, subject_id")
+        .select("id, subject_id, day_of_week")
         .in("subject_id", subjectIds);
 
       if (statSlotsError) {
@@ -301,7 +314,9 @@ export default function DashboardPage() {
       }
 
       const typedStatSlots =
-        (statSlots as Array<{ id: string; subject_id: string }> | null) ?? [];
+        (statSlots as
+          | Array<{ id: string; subject_id: string; day_of_week: number }>
+          | null) ?? [];
       const statSlotIds = typedStatSlots.map((slot) => slot.id);
 
       if (!statSlotIds.length) {
@@ -315,8 +330,12 @@ export default function DashboardPage() {
             attended: 0,
             percentage: null,
             canMiss: 0,
+            remainingClasses: 0,
+            bestCasePercent: null,
+            worstCasePercent: null,
           }))
         );
+        setAlerts([]);
         return;
       }
 
@@ -324,33 +343,58 @@ export default function DashboardPage() {
         .from("attendance_records")
         .select("slot_id, status")
         .in("slot_id", statSlotIds)
-        .lte("date", todayIso);
+        .lte("date", todayIso)
+        .neq("status", "cancelled");
 
       if (statAttendanceError) {
         throw statAttendanceError;
       }
 
-      const allAttendance = (statAttendance as AttendanceRow[] | null) ?? [];
-      const slotIdsBySubject = new Map<string, string[]>();
+      const { data: futureCancelledOverrides, error: futureCancelledOverridesError } =
+        await supabase
+          .from("day_overrides")
+          .select("slot_id, date")
+          .eq("type", "cancelled")
+          .in("slot_id", statSlotIds)
+          .gt("date", todayIso)
+          .lte("date", activeSemester.end_date);
 
-      for (const slot of typedStatSlots) {
-        const current = slotIdsBySubject.get(slot.subject_id) ?? [];
-        current.push(slot.id);
-        slotIdsBySubject.set(slot.subject_id, current);
+      if (futureCancelledOverridesError) {
+        throw futureCancelledOverridesError;
       }
 
-      setSubjectStats(
-        typedSubjects.map((subject) => {
-          const subjectSlotIds = slotIdsBySubject.get(subject.id) ?? [];
-          const subjectAttendance = allAttendance.filter((record) =>
+      const allAttendance = (statAttendance as AttendanceRow[] | null) ?? [];
+      const slotsBySubject = new Map<
+        string,
+        Array<{ id: string; subject_id: string; day_of_week: number }>
+      >();
+      const cancelledOverrideSet = new Set(
+        (
+          (futureCancelledOverrides as
+            | Array<{ slot_id: string; date: string }>
+            | null) ?? []
+        ).map((override) => `${override.slot_id}:${override.date}`)
+      );
+
+      for (const slot of typedStatSlots) {
+        const currentSlots = slotsBySubject.get(slot.subject_id) ?? [];
+        currentSlots.push(slot);
+        slotsBySubject.set(slot.subject_id, currentSlots);
+      }
+
+      const computedStats = typedSubjects.map((subject) => {
+          const subjectSlotIds = typedStatSlots
+            .filter((slot) => slot.subject_id === subject.id)
+            .map((slot) => slot.id);
+          const subjectSlots = slotsBySubject.get(subject.id) ?? [];
+          const subjectRecords = allAttendance.filter((record) =>
             subjectSlotIds.includes(record.slot_id)
           );
-          const effectiveAttendance = subjectAttendance.filter(
+          const totalHeld = subjectRecords.filter(
             (record) =>
               record.status === "present" || record.status === "absent"
-          );
-          const totalHeld = effectiveAttendance.length;
-          const attended = effectiveAttendance.filter(
+          ).length;
+          const attended = subjectRecords.filter(
             (record) => record.status === "present"
           ).length;
           const percentage =
@@ -358,6 +402,52 @@ export default function DashboardPage() {
           const canMiss =
             Math.floor(attended / (subject.min_attendance_percent / 100)) -
             totalHeld;
+          let remainingClasses = 0;
+
+          const futureDate = new Date(`${todayIso}T00:00:00`);
+          futureDate.setHours(0, 0, 0, 0);
+          futureDate.setDate(futureDate.getDate() + 1);
+          const semesterEndDate = new Date(`${activeSemester.end_date}T00:00:00`);
+          semesterEndDate.setHours(0, 0, 0, 0);
+
+          while (futureDate <= semesterEndDate) {
+            const isoDate = futureDate.toISOString().split("T")[0];
+            const dayOfWeek = futureDate.getDay();
+
+            for (const slot of subjectSlots) {
+              if (
+                slot.day_of_week === dayOfWeek &&
+                !cancelledOverrideSet.has(`${slot.id}:${isoDate}`)
+              ) {
+                remainingClasses += 1;
+              }
+            }
+
+            futureDate.setDate(futureDate.getDate() + 1);
+          }
+
+          const bestCasePercent =
+            remainingClasses > 0
+              ? Math.round(
+                  ((attended + remainingClasses) /
+                    (totalHeld + remainingClasses)) *
+                    100
+                )
+              : Math.round(
+                  percentage ?? 0
+                );
+          const worstCasePercent =
+            remainingClasses > 0
+              ? Math.round((attended / (totalHeld + remainingClasses)) * 100)
+              : percentage;
+
+          console.log({
+            name: subject.name,
+            totalHeld,
+            attended,
+            percentage,
+            remainingClasses,
+          });
 
           return {
             id: subject.id,
@@ -368,9 +458,43 @@ export default function DashboardPage() {
             attended,
             percentage,
             canMiss,
+            remainingClasses,
+            bestCasePercent,
+            worstCasePercent,
           };
-        })
-      );
+        });
+
+      setSubjectStats(computedStats);
+      const nextAlerts: AlertItem[] = [];
+
+      for (const subject of computedStats) {
+        if (
+          subject.percentage !== null &&
+          subject.percentage < subject.minAttendancePercent
+        ) {
+          nextAlerts.push({
+            subjectName: subject.name,
+            type: "danger",
+            message: `${subject.name} is below minimum attendance (${subject.percentage}%)`,
+          });
+          continue;
+        }
+
+        if (
+          subject.percentage !== null &&
+          subject.percentage >= subject.minAttendancePercent &&
+          subject.canMiss <= 2 &&
+          subject.canMiss >= 0
+        ) {
+          nextAlerts.push({
+            subjectName: subject.name,
+            type: "warning",
+            message: `${subject.name} can only miss ${subject.canMiss} more class(es)`,
+          });
+        }
+      }
+
+      setAlerts(nextAlerts);
     }
 
     async function loadDashboard() {
@@ -380,7 +504,7 @@ export default function DashboardPage() {
       try {
         const { data: semester, error: semesterError } = await supabase
           .from("semesters")
-          .select("id, name")
+          .select("id, name, end_date")
           .eq("user_id", PHASE_ONE_USER_ID)
           .lte("start_date", todayIso)
           .gte("end_date", todayIso)
@@ -395,12 +519,13 @@ export default function DashboardPage() {
           setActiveSemester(null);
           setClasses([]);
           setSubjectStats([]);
+          setAlerts([]);
           setOverrides({});
           return;
         }
 
         setActiveSemester(semester);
-        await loadStats(semester.id);
+        await loadStats(semester);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -760,6 +885,37 @@ export default function DashboardPage() {
               </Card>
             ) : null}
 
+            {alerts
+              .filter((alert) => !dismissedAlerts.has(alert.subjectName))
+              .map((alert) => (
+                <div
+                  key={alert.subjectName}
+                  className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 ${
+                    alert.type === "danger"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-sm">⚠</span>
+                    <p className="text-sm font-medium">{alert.message}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium"
+                    onClick={() =>
+                      setDismissedAlerts((current) => {
+                        const next = new Set(current);
+                        next.add(alert.subjectName);
+                        return next;
+                      })
+                    }
+                  >
+                    X
+                  </button>
+                </div>
+              ))}
+
             {isLoading ? (
               <div className="grid gap-4">
                 {[1, 2].map((item) => (
@@ -932,6 +1088,14 @@ export default function DashboardPage() {
                                 ? "On the edge — attend next class"
                                 : `Attend ${Math.abs(subject.canMiss)} classes to recover`}
                           </p>
+                          {subject.bestCasePercent !== null &&
+                          subject.worstCasePercent !== null ? (
+                            <p className="text-xs text-zinc-500">
+                              By semester end: {subject.worstCasePercent}% (worst)
+                              {" \u2192 "}
+                              {subject.bestCasePercent}% (best)
+                            </p>
+                          ) : null}
                         </>
                       )}
                     </CardContent>
