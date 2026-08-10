@@ -59,6 +59,7 @@ const dayLabels = [
 ];
 
 const branches = ["BBA", "BCA", "BSc AIML", "BSc M&C"] as const;
+const semesterNumbers = ["1st", "2nd", "3rd", "4th", "5th", "6th"] as const;
 const THEME_STORAGE_KEY = "attendify-theme";
 
 export default function SetupPage() {
@@ -75,6 +76,7 @@ export default function SetupPage() {
   const [semesterEndDate, setSemesterEndDate] = useState("");
   const [savedSemester, setSavedSemester] = useState<SemesterInsert | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
+  const [semesterNumber, setSemesterNumber] = useState<(typeof semesterNumbers)[number] | null>(null);
 
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -178,6 +180,7 @@ export default function SetupPage() {
       const formData = new FormData();
       formData.append("image", timetableFile);
       formData.append("branch", selectedBranch ?? "");
+      formData.append("semesterNumber", semesterNumber ?? "");
 
       const response = await fetch("/api/parse-timetable", {
         method: "POST",
@@ -410,37 +413,68 @@ export default function SetupPage() {
         {currentStep === 2 && (
           <Card>
             <CardHeader>
-              <CardTitle>Select Branch</CardTitle>
+              <CardTitle>Select Branch & Semester Number</CardTitle>
               <CardDescription>
-                Choose the branch to extract from the timetable image.
+                Choose the semester number and branch to extract from the timetable.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              {branches.map((branch) => {
-                const isSelected = selectedBranch === branch;
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Semester Number</Label>
+                <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+                  {semesterNumbers.map((num) => {
+                    const isSelected = semesterNumber === num;
 
-                return (
-                  <button
-                    key={branch}
-                    type="button"
-                    onClick={() => setSelectedBranch(branch)}
-                    className={`rounded-xl border p-5 text-left transition-colors ${
-                      isSelected
-                        ? "border-zinc-950 bg-zinc-950 text-white"
-                        : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                    }`}
-                  >
-                    <p className="text-base font-semibold">{branch}</p>
-                    <p
-                      className={`mt-1 text-sm ${
-                        isSelected ? "text-zinc-200" : "text-muted-foreground"
-                      }`}
-                    >
-                      Extract only classes for {branch}.
-                    </p>
-                  </button>
-                );
-              })}
+                    return (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setSemesterNumber(num)}
+                        className={`rounded-xl border py-3 px-4 text-center text-sm font-semibold transition-colors ${
+                          isSelected
+                            ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
+                            : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        {num}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Branch</Label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {branches.map((branch) => {
+                    const isSelected = selectedBranch === branch;
+
+                    return (
+                      <button
+                        key={branch}
+                        type="button"
+                        onClick={() => setSelectedBranch(branch)}
+                        className={`rounded-xl border p-4 text-left transition-colors ${
+                          isSelected
+                            ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
+                            : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        <p className="text-base font-semibold">{branch}</p>
+                        <p
+                          className={`mt-1 text-xs ${
+                            isSelected
+                              ? "text-zinc-200 dark:text-zinc-800"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          Extract only classes for {branch}.
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </CardContent>
             <CardFooter className="justify-between gap-3">
               <Button variant="outline" onClick={() => setCurrentStep(1)}>
@@ -448,7 +482,7 @@ export default function SetupPage() {
               </Button>
               <Button
                 type="button"
-                disabled={!selectedBranch}
+                disabled={!selectedBranch || !semesterNumber}
                 onClick={() => setCurrentStep(3)}
               >
                 Continue
@@ -609,8 +643,10 @@ export default function SetupPage() {
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
-                <p className="text-sm text-muted-foreground">Branch</p>
-                <p className="mt-1 font-medium">{selectedBranch ?? "-"}</p>
+                <p className="text-sm text-muted-foreground">Branch & Semester</p>
+                <p className="mt-1 font-medium">
+                  {selectedBranch ?? "-"} {semesterNumber ? `(${semesterNumber})` : ""}
+                </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Holidays</p>

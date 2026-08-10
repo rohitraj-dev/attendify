@@ -15,38 +15,32 @@ const ALLOWED_TIMETABLE_MIME_TYPES = [
   "image/webp",
 ];
 
-function buildPrompt() {
-  return `
-You are reading a weekly class timetable image or PDF.
+function buildPrompt(branch: string, semesterNumber: string) {
+  return `You are parsing a college timetable PDF with multiple semester tables and multiple branch columns.
 
-Extract ONLY the BCA column. Ignore every other branch or section.
+IMPORTANT:
+- Extract ONLY from the "${semesterNumber} Semester" table
+- Extract ONLY the "${branch}" column
+- Days are columns: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5
+- Detect time slots from the table rows automatically
+- LAB sessions spanning 2 rows = one slot (start of first row to end of second row)
+- Each cell has subject code + teacher initials
 
-Rules:
-- Work only with Monday through Friday.
-- For each non-empty BCA timetable cell, extract:
-  - subject_code
-  - teacher
-  - room
-- If a cell is empty or contains only a dash, skip it.
-- Handle merged cells correctly:
-  - if the same class spans multiple timetable rows, treat it as one slot
-  - use the full merged time block as the slot's time range
-- Return 24-hour times in HH:MM format.
-- Return day as a number where 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday.
-- Return JSON only, with this exact shape:
+Return ONLY JSON, no explanation:
 {
   "slots": [
     {
       "day": 1,
       "start_time": "09:00",
-      "end_time": "10:00",
-      "subject_code": "BCA101",
-      "teacher": "AB",
-      "room": "204"
+      "end_time": "09:50", 
+      "subject_code": "CA",
+      "teacher": "teacher initials"
     }
   ]
 }
-`;
+
+Skip empty cells, LUNCH BREAK, and LIB slots.
+Time format: HH:MM 24-hour.`;
 }
 
 function normalizeSlot(slot: unknown) {
@@ -107,6 +101,9 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
+    const branch = formData.get("branch")?.toString() || "BCA";
+    const semesterNumber = formData.get("semesterNumber")?.toString() || "1st";
+
     const { file, mimeType } = getValidatedFile(
       formData,
       ["file", "image"],
@@ -124,7 +121,7 @@ export async function POST(request: Request) {
     });
 
     const result = await model.generateContent([
-      buildPrompt(),
+      buildPrompt(branch, semesterNumber),
       {
         inlineData,
       },
