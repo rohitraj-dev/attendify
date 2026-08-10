@@ -5,6 +5,7 @@ import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { HolidayManager } from "@/components/HolidayManager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,12 +27,6 @@ type SemesterInsert = {
   name: string;
   start_date: string;
   end_date: string;
-};
-
-type DraftHoliday = {
-  id: string;
-  date: string;
-  reason: string;
 };
 
 type ParsedSlot = {
@@ -74,7 +69,6 @@ export default function SetupPage() {
   const [isSavingSemester, setIsSavingSemester] = useState(false);
   const [isParsingTimetable, setIsParsingTimetable] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
-  const [isSavingHolidays, setIsSavingHolidays] = useState(false);
 
   const [semesterName, setSemesterName] = useState("");
   const [semesterStartDate, setSemesterStartDate] = useState("");
@@ -85,10 +79,6 @@ export default function SetupPage() {
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [parsedSlots, setParsedSlots] = useState<ParsedSlot[]>([]);
-
-  const [holidayDate, setHolidayDate] = useState("");
-  const [holidayReason, setHolidayReason] = useState("");
-  const [holidays, setHolidays] = useState<DraftHoliday[]>([]);
 
   const progressValue = (currentStep / TOTAL_STEPS) * 100;
 
@@ -298,64 +288,6 @@ export default function SetupPage() {
       toast.error(message);
     } finally {
       setIsSavingSchedule(false);
-    }
-  }
-
-  function handleAddHoliday(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!holidayDate || !holidayReason.trim()) {
-      toast.error("Add both holiday date and reason");
-      return;
-    }
-
-    setHolidays((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        date: holidayDate,
-        reason: holidayReason.trim(),
-      },
-    ]);
-    setHolidayDate("");
-    setHolidayReason("");
-  }
-
-  async function handleSaveHolidays() {
-    if (!savedSemester?.id) {
-      toast.error("Create a semester first");
-      return;
-    }
-
-    if (!holidays.length) {
-      toast.error("Add at least one holiday");
-      return;
-    }
-
-    setIsSavingHolidays(true);
-
-    try {
-      const { error } = await supabase.from("holidays").upsert(
-        holidays.map((holiday) => ({
-          semester_id: savedSemester.id,
-          date: holiday.date,
-          reason: holiday.reason,
-        })),
-        { onConflict: "semester_id,date", ignoreDuplicates: true }
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      setCurrentStep(5);
-      toast.success("Holidays saved");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to save holidays";
-      toast.error(message);
-    } finally {
-      setIsSavingHolidays(false);
     }
   }
 
@@ -641,86 +573,17 @@ export default function SetupPage() {
         )}
 
         {currentStep === 4 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Upload Holiday List</CardTitle>
-              <CardDescription>
-                Add holidays one by one, then save them to your semester.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <form
-                onSubmit={handleAddHoliday}
-                className="grid gap-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 sm:grid-cols-[1fr_1.4fr_auto]"
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="holiday-date">Date</Label>
-                  <Input
-                    id="holiday-date"
-                    type="date"
-                    value={holidayDate}
-                    onChange={(event) => setHolidayDate(event.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="holiday-reason">Reason</Label>
-                  <Input
-                    id="holiday-reason"
-                    value={holidayReason}
-                    onChange={(event) => setHolidayReason(event.target.value)}
-                    placeholder="Festival / college event"
-                    required
-                  />
-                </div>
-
-                <div className="flex items-end">
-                  <Button type="submit" className="w-full sm:w-auto">
-                    Add holiday
-                  </Button>
-                </div>
-              </form>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-medium">Added holidays</h2>
-                  <Badge variant="outline">{holidays.length} total</Badge>
-                </div>
-
-                {holidays.length ? (
-                  <div className="space-y-3">
-                    {holidays.map((holiday) => (
-                      <div
-                        key={holiday.id}
-                        className="flex flex-col justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center"
-                      >
-                        <div>
-                          <p className="font-medium">{holiday.reason}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {holiday.date}
-                          </p>
-                        </div>
-                        <Badge variant="secondary">Holiday</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-muted-foreground dark:border-zinc-700 dark:bg-zinc-900">
-                    No holidays added yet.
-                  </div>
-                )}
-              </div>
-            </CardContent>
-            <CardFooter className="justify-between gap-3">
+          <div className="space-y-4">
+            <HolidayManager semesterId={savedSemester?.id ?? ""} />
+            <div className="flex justify-between gap-3">
               <Button variant="outline" onClick={() => setCurrentStep(3)}>
                 Back
               </Button>
-              <Button onClick={handleSaveHolidays} disabled={isSavingHolidays}>
-                {isSavingHolidays ? "Saving..." : "Save Holidays"}
+              <Button onClick={() => setCurrentStep(5)}>
+                Continue
               </Button>
-            </CardFooter>
-          </Card>
+            </div>
+          </div>
         )}
 
         {currentStep === 5 && (
@@ -751,7 +614,7 @@ export default function SetupPage() {
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Holidays</p>
-                <p className="mt-1 font-medium">{holidays.length}</p>
+                <p className="mt-1 font-medium">Configured</p>
               </div>
             </CardContent>
             <CardFooter className="justify-between gap-3">
