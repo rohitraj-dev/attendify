@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, ChevronLeft, ChevronRight, MoreVertical } from "lucide-react";
+import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  Moon,
+  MoreVertical,
+  Sun,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +50,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus } from "@/lib/types";
 
 const PHASE_ONE_USER_ID = "00000000-0000-0000-0000-000000000001";
+const THEME_STORAGE_KEY = "attendify-theme";
 
 type ActiveSemester = {
   id: string;
@@ -315,12 +323,26 @@ export default function DashboardPage() {
   );
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
   const todayIso = today.toISOString().split("T")[0];
   const localTodayIso = formatLocalDateIso(today);
   const headerDate = formatDisplayDate(today);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const shouldUseDark = savedTheme === "dark";
+
+    document.documentElement.classList.toggle("dark", shouldUseDark);
+
+    const frameId = window.requestAnimationFrame(() => {
+      setIsDarkMode(shouldUseDark);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   useEffect(() => {
     async function autoMarkPastSlots(
@@ -1099,110 +1121,140 @@ export default function DashboardPage() {
         }))
     : [];
 
+  function handleThemeToggle() {
+    setIsDarkMode((current) => {
+      const next = !current;
+
+      document.documentElement.classList.toggle("dark", next);
+      window.localStorage.setItem(
+        THEME_STORAGE_KEY,
+        next ? "dark" : "light"
+      );
+
+      return next;
+    });
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-50 px-4 py-8 text-zinc-950">
+    <div className="min-h-screen bg-background px-4 py-8 text-foreground">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <p className="text-sm font-medium text-zinc-500">
+            <p className="text-sm font-medium text-muted-foreground">
               {activeSemester?.name ?? "Attendify"}
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">
               Today — {headerDate}
             </h1>
           </div>
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="relative shrink-0"
-              >
-                <Bell />
-                {unreadAlertCount > 0 ? (
-                  <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
-                    {unreadAlertCount}
-                  </span>
-                ) : null}
-                <span className="sr-only">Open notifications</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:max-w-md">
-              <SheetHeader>
-                <SheetTitle>Notifications</SheetTitle>
-                <SheetDescription>
-                  Attendance alerts for your dashboard.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="flex items-center justify-between px-4">
-                <p className="text-sm text-zinc-500">
-                  {alerts.length} alert{alerts.length === 1 ? "" : "s"}
-                </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0"
+              onClick={handleThemeToggle}
+            >
+              {isDarkMode ? <Sun /> : <Moon />}
+              <span className="sr-only">Toggle theme</span>
+            </Button>
+            <Sheet>
+              <SheetTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  disabled={unreadAlertCount === 0}
-                  onClick={() =>
-                    setReadAlerts(new Set(alerts.map((alert) => getAlertKey(alert))))
-                  }
+                  size="icon-sm"
+                  className="relative shrink-0"
                 >
-                  Mark all as read
+                  <Bell />
+                  {unreadAlertCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
+                      {unreadAlertCount}
+                    </span>
+                  ) : null}
+                  <span className="sr-only">Open notifications</span>
                 </Button>
-              </div>
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
-                {alerts.length ? (
-                  alerts.map((alert) => {
-                    const isUnread = !readAlerts.has(getAlertKey(alert));
+              </SheetTrigger>
+              <SheetContent side="right" className="w-full sm:max-w-md">
+                <SheetHeader>
+                  <SheetTitle>Notifications</SheetTitle>
+                  <SheetDescription>
+                    Attendance alerts for your dashboard.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex items-center justify-between px-4">
+                  <p className="text-sm text-muted-foreground">
+                    {alerts.length} alert{alerts.length === 1 ? "" : "s"}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={unreadAlertCount === 0}
+                    onClick={() =>
+                      setReadAlerts(new Set(alerts.map((alert) => getAlertKey(alert))))
+                    }
+                  >
+                    Mark all as read
+                  </Button>
+                </div>
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+                  {alerts.length ? (
+                    alerts.map((alert) => {
+                      const isUnread = !readAlerts.has(getAlertKey(alert));
 
-                    return (
-                      <div
-                        key={getAlertKey(alert)}
-                        className={`rounded-xl border px-4 py-3 ${
-                          alert.type === "danger"
-                            ? "border-red-200 bg-red-50"
-                            : "border-amber-200 bg-amber-50"
-                        }`}
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span
-                            className={`text-xs font-semibold uppercase tracking-wide ${
-                              alert.type === "danger"
-                                ? "text-red-700"
-                                : "text-amber-700"
-                            }`}
-                          >
-                            {alert.type}
-                          </span>
-                          {isUnread ? (
-                            <span className="text-xs font-medium text-red-500">
-                              Unread
-                            </span>
-                          ) : (
-                            <span className="text-xs text-zinc-500">Read</span>
-                          )}
-                        </div>
-                        <p
-                          className={`text-sm font-medium ${
+                      return (
+                        <div
+                          key={getAlertKey(alert)}
+                          className={`rounded-xl border px-4 py-3 ${
                             alert.type === "danger"
-                              ? "text-red-700"
-                              : "text-amber-700"
+                              ? "border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/30"
+                              : "border-amber-200 bg-amber-50 dark:border-amber-950 dark:bg-amber-950/20"
                           }`}
                         >
-                          {alert.message}
-                        </p>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-xl border border-zinc-200 bg-white px-4 py-6">
-                    <p className="text-sm text-zinc-600">No alerts right now</p>
-                  </div>
-                )}
-              </div>
-            </SheetContent>
-          </Sheet>
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <span
+                              className={`text-xs font-semibold uppercase tracking-wide ${
+                                alert.type === "danger"
+                                  ? "text-red-700 dark:text-red-300"
+                                  : "text-amber-700 dark:text-amber-300"
+                              }`}
+                            >
+                              {alert.type}
+                            </span>
+                            {isUnread ? (
+                              <span className="text-xs font-medium text-red-500">
+                                Unread
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                Read
+                              </span>
+                            )}
+                          </div>
+                          <p
+                            className={`text-sm font-medium ${
+                              alert.type === "danger"
+                                ? "text-red-700 dark:text-red-200"
+                                : "text-amber-700 dark:text-amber-200"
+                            }`}
+                          >
+                            {alert.message}
+                          </p>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-xl border border-border bg-card px-4 py-6">
+                      <p className="text-sm text-muted-foreground">
+                        No alerts right now
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
 
         <Tabs defaultValue="today" className="gap-4">
@@ -1214,7 +1266,7 @@ export default function DashboardPage() {
 
           <TabsContent value="today" className="space-y-4">
             {error ? (
-              <Card className="bg-white">
+              <Card>
                 <CardContent className="pt-6">
                   <p className="text-sm text-red-600">{error}</p>
                 </CardContent>
@@ -1255,11 +1307,11 @@ export default function DashboardPage() {
             {isLoading ? (
               <div className="grid gap-4">
                 {[1, 2].map((item) => (
-                  <Card key={item} className="bg-white">
+                  <Card key={item}>
                     <CardContent className="pt-6">
                       <div className="space-y-3">
-                        <div className="h-5 w-40 rounded bg-zinc-200" />
-                        <div className="h-4 w-28 rounded bg-zinc-100" />
+                        <div className="h-5 w-40 rounded bg-zinc-200 dark:bg-zinc-700" />
+                        <div className="h-4 w-28 rounded bg-zinc-100 dark:bg-zinc-800" />
                       </div>
                     </CardContent>
                   </Card>
@@ -1271,7 +1323,7 @@ export default function DashboardPage() {
                   const isPending = pendingSlotIds.includes(slot.id);
 
                   return (
-                    <Card key={slot.id} className="bg-white">
+                    <Card key={slot.id}>
                       <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
                         <div className="space-y-1">
                           <CardTitle
@@ -1332,9 +1384,9 @@ export default function DashboardPage() {
                       <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <p
                           className={`text-sm ${
-                            slot.overrideType === "cancelled"
+                              slot.overrideType === "cancelled"
                               ? "text-zinc-400 line-through"
-                              : "text-zinc-600"
+                              : "text-muted-foreground"
                           }`}
                         >
                           {slot.overrideType === "cancelled"
@@ -1366,9 +1418,9 @@ export default function DashboardPage() {
                 })}
               </div>
             ) : (
-              <Card className="bg-white">
+              <Card>
                 <CardContent className="pt-6">
-                  <p className="text-sm text-zinc-600">No classes today</p>
+                  <p className="text-sm text-muted-foreground">No classes today</p>
                 </CardContent>
               </Card>
             )}
@@ -1378,14 +1430,16 @@ export default function DashboardPage() {
             {subjectStats.length ? (
               <div className="grid gap-4">
                 {subjectStats.map((subject) => (
-                  <Card key={subject.id} className="bg-white">
+                  <Card key={subject.id}>
                     <CardHeader>
                       <CardTitle>{subject.name}</CardTitle>
                       <CardDescription>{subject.code}</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {subject.totalHeld === 0 ? (
-                        <p className="text-sm text-zinc-600">No classes held yet</p>
+                        <p className="text-sm text-muted-foreground">
+                          No classes held yet
+                        </p>
                       ) : (
                         <>
                           <Progress
@@ -1395,7 +1449,7 @@ export default function DashboardPage() {
                               subject.minAttendancePercent
                             )}
                           />
-                          <p className="text-sm text-zinc-600">
+                          <p className="text-sm text-muted-foreground">
                             {subject.percentage}% attendance ({subject.attended}/
                             {subject.totalHeld} classes)
                           </p>
@@ -1426,7 +1480,7 @@ export default function DashboardPage() {
                           </p>
                           {subject.bestCasePercent !== null &&
                           subject.worstCasePercent !== null ? (
-                            <p className="text-xs text-zinc-500">
+                            <p className="text-xs text-muted-foreground">
                               By semester end: {subject.worstCasePercent}% (worst)
                               {" \u2192 "}
                               {subject.bestCasePercent}% (best)
@@ -1439,16 +1493,18 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <Card className="bg-white">
+              <Card>
                 <CardContent className="pt-6">
-                  <p className="text-sm text-zinc-600">No subject stats available</p>
+                  <p className="text-sm text-muted-foreground">
+                    No subject stats available
+                  </p>
                 </CardContent>
               </Card>
             )}
           </TabsContent>
 
           <TabsContent value="calendar" className="space-y-4">
-            <Card className="bg-white">
+            <Card>
               <CardHeader className="gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <CardTitle>{formatMonthLabel(displayedMonth)}</CardTitle>
@@ -1504,7 +1560,7 @@ export default function DashboardPage() {
                   {WEEKDAY_LABELS.map((label) => (
                     <div
                       key={label}
-                      className="px-2 text-center text-xs font-semibold uppercase tracking-wide text-zinc-500"
+                      className="px-2 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                     >
                       {label}
                     </div>
@@ -1526,8 +1582,8 @@ export default function DashboardPage() {
                         onClick={() => setSelectedCalendarDate(dateKey)}
                         className={`min-h-24 rounded-xl border p-2 text-left transition ${
                           isCurrentMonth
-                            ? "border-zinc-200 bg-white hover:border-zinc-300"
-                            : "border-zinc-100 bg-zinc-50 text-zinc-400"
+                            ? "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+                            : "border-zinc-100 bg-zinc-50 text-zinc-400 dark:border-zinc-900 dark:bg-zinc-950 dark:text-zinc-600"
                         } ${isSelected ? "ring-2 ring-zinc-900/10" : ""}`}
                       >
                         <span
@@ -1557,18 +1613,20 @@ export default function DashboardPage() {
                 </div>
 
                 {isCalendarLoading ? (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6">
-                    <p className="text-sm text-zinc-600">Loading calendar...</p>
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 dark:border-zinc-800 dark:bg-zinc-900">
+                    <p className="text-sm text-muted-foreground">
+                      Loading calendar...
+                    </p>
                   </div>
                 ) : selectedCalendarDate ? (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900">
                     <div className="mb-4">
                       <p className="text-sm font-semibold text-zinc-900">
                         {formatDisplayDate(
                           new Date(`${selectedCalendarDate}T00:00:00`)
                         )}
                       </p>
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-muted-foreground">
                         {selectedCalendarClasses.length
                           ? "Classes and attendance status"
                           : "No classes scheduled for this day"}
@@ -1580,13 +1638,13 @@ export default function DashboardPage() {
                         {selectedCalendarClasses.map((item) => (
                           <div
                             key={item.id}
-                            className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                            className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div>
                               <p className="text-sm font-medium text-zinc-900">
                                 {item.subjectName}
                               </p>
-                              <p className="text-xs text-zinc-500">
+                              <p className="text-xs text-muted-foreground">
                                 {item.subjectCode ? `${item.subjectCode} • ` : ""}
                                 {item.timeRange}
                               </p>
@@ -1610,8 +1668,8 @@ export default function DashboardPage() {
                     ) : null}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6">
-                    <p className="text-sm text-zinc-600">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 dark:border-zinc-800 dark:bg-zinc-900">
+                    <p className="text-sm text-muted-foreground">
                       Select a day to view its classes and attendance status.
                     </p>
                   </div>

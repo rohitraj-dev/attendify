@@ -1,24 +1,98 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  extractJsonObject,
+  getValidatedFile,
+  RouteError,
+  toGeminiInlineData,
+} from "@/app/api/_lib/document-parser";
 
-function buildPrompt(branch: string) {
-  return `This timetable has multiple branches. Extract ONLY the classes for branch: ${branch}. Each cell contains subject code, teacher initials (underlined), and sometimes an explicit room number. Return JSON array with fields: day (0=Mon to 4=Fri), start_time, end_time, subject_code, teacher_initials, room. Return only the JSON array, nothing else.`;
+export const runtime = "nodejs";
+
+const ALLOWED_TIMETABLE_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+];
+
+function buildPrompt() {
+  return `
+You are reading a weekly class timetable image or PDF.
+
+Extract ONLY the BCA column. Ignore every other branch or section.
+
+Rules:
+- Work only with Monday through Friday.
+- For each non-empty BCA timetable cell, extract:
+  - subject_code
+  - teacher
+  - room
+- If a cell is empty or contains only a dash, skip it.
+- Handle merged cells correctly:
+  - if the same class spans multiple timetable rows, treat it as one slot
+  - use the full merged time block as the slot's time range
+- Return 24-hour times in HH:MM format.
+- Return day as a number where 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday.
+- Return JSON only, with this exact shape:
+{
+  "slots": [
+    {
+      "day": 1,
+      "start_time": "09:00",
+      "end_time": "10:00",
+      "subject_code": "BCA101",
+      "teacher": "AB",
+      "room": "204"
+    }
+  ]
+}
+`;
 }
 
-function extractJsonArray(text: string) {
-  const trimmed = text.trim();
-
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return trimmed;
+function normalizeSlot(slot: unknown) {
+  if (!slot || typeof slot !== "object") {
+    throw new RouteError("Gemini returned an invalid slot entry", 502);
   }
 
-  const start = trimmed.indexOf("[");
-  const end = trimmed.lastIndexOf("]");
+  const rawSlot = slot as Record<string, unknown>;
+  const rawDay = Number(rawSlot.day);
+  const normalizedDay =
+    Number.isInteger(rawDay) && rawDay >= 0 && rawDay <= 4 ? rawDay + 1 : rawDay;
+  const teacher =
+    typeof rawSlot.teacher === "string"
+      ? rawSlot.teacher.trim()
+      : typeof rawSlot.teacher_initials === "string"
+        ? rawSlot.teacher_initials.trim()
+        : "";
 
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Model response was not valid JSON array text");
+  if (!Number.isInteger(normalizedDay) || normalizedDay < 1 || normalizedDay > 5) {
+    throw new RouteError("Gemini returned a slot with an invalid day value", 502);
   }
 
-  return trimmed.slice(start, end + 1);
+  if (
+    typeof rawSlot.start_time !== "string" ||
+    !/^\d{2}:\d{2}$/.test(rawSlot.start_time) ||
+    typeof rawSlot.end_time !== "string" ||
+    !/^\d{2}:\d{2}$/.test(rawSlot.end_time)
+  ) {
+    throw new RouteError("Gemini returned a slot with an invalid time value", 502);
+  }
+
+  if (typeof rawSlot.subject_code !== "string" || !rawSlot.subject_code.trim()) {
+    throw new RouteError(
+      "Gemini returned a slot without a subject code",
+      502
+    );
+  }
+
+  return {
+    day: normalizedDay,
+    start_time: rawSlot.start_time,
+    end_time: rawSlot.end_time,
+    subject_code: rawSlot.subject_code.trim(),
+    teacher,
+    room: typeof rawSlot.room === "string" ? rawSlot.room.trim() : "",
+  };
 }
 
 export async function POST(request: Request) {
@@ -33,46 +107,38 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const image = formData.get("image");
-    const branch = formData.get("branch");
-
-    if (!(image instanceof File)) {
-      return Response.json(
-        { success: false, error: 'Missing image file in field "image"' },
-        { status: 400 }
-      );
-    }
-
-    if (typeof branch !== "string" || !branch.trim()) {
-      return Response.json(
-        { success: false, error: 'Missing branch in field "branch"' },
-        { status: 400 }
-      );
-    }
-
-    const buffer = Buffer.from(await image.arrayBuffer());
-    const imageBase64 = buffer.toString("base64");
+    const { file, mimeType } = getValidatedFile(
+      formData,
+      ["image"],
+      ALLOWED_TIMETABLE_MIME_TYPES,
+      "a PDF or image file (JPG, PNG, or WEBP)"
+    );
+    const inlineData = await toGeminiInlineData(file, mimeType);
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.1-flash-lite",
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    });
 
     const result = await model.generateContent([
-      buildPrompt(branch),
+      buildPrompt(),
       {
-        inlineData: {
-          mimeType: image.type || "image/png",
-          data: imageBase64,
-        },
+        inlineData,
       },
     ]);
 
     const responseText = result.response.text();
-    const jsonText = extractJsonArray(responseText);
-    const slots = JSON.parse(jsonText);
+    const jsonText = extractJsonObject(responseText);
+    const parsed = JSON.parse(jsonText) as { slots?: unknown };
 
-    if (!Array.isArray(slots)) {
-      throw new Error("Parsed response was not an array");
+    if (!parsed || !Array.isArray(parsed.slots)) {
+      throw new RouteError("Gemini response did not include a slots array", 502);
     }
+
+    const slots = parsed.slots.map((slot) => normalizeSlot(slot));
 
     return Response.json({ success: true, slots });
   } catch (error) {
@@ -84,7 +150,7 @@ export async function POST(request: Request) {
             ? error.message
             : "Failed to parse timetable",
       },
-      { status: 500 }
+      { status: error instanceof RouteError ? error.status : 500 }
     );
   }
 }

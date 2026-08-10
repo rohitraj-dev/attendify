@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Moon, Sun } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ type DraftHoliday = {
 type ParsedSlot = {
   id: string;
   subject_code: string;
-  teacher_initials: string;
+  teacher: string;
   room: string;
   day: number;
   start_time: string;
@@ -63,9 +64,11 @@ const dayLabels = [
 ];
 
 const branches = ["BBA", "BCA", "BSc AIML", "BSc M&C"] as const;
+const THEME_STORAGE_KEY = "attendify-theme";
 
 export default function SetupPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSavingSemester, setIsSavingSemester] = useState(false);
@@ -88,6 +91,33 @@ export default function SetupPage() {
   const [holidays, setHolidays] = useState<DraftHoliday[]>([]);
 
   const progressValue = (currentStep / TOTAL_STEPS) * 100;
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const shouldUseDark = savedTheme === "dark";
+
+    document.documentElement.classList.toggle("dark", shouldUseDark);
+
+    const frameId = window.requestAnimationFrame(() => {
+      setIsDarkMode(shouldUseDark);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  function handleThemeToggle() {
+    setIsDarkMode((current) => {
+      const next = !current;
+
+      document.documentElement.classList.toggle("dark", next);
+      window.localStorage.setItem(
+        THEME_STORAGE_KEY,
+        next ? "dark" : "light"
+      );
+
+      return next;
+    });
+  }
 
   async function handleSemesterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -168,7 +198,7 @@ export default function SetupPage() {
             success: true;
             slots: Array<{
               subject_code: string;
-              teacher_initials: string;
+              teacher: string;
               room: string;
               day: number;
               start_time: string;
@@ -187,7 +217,7 @@ export default function SetupPage() {
         payload.slots.map((slot) => ({
           id: crypto.randomUUID(),
           subject_code: slot.subject_code,
-          teacher_initials: slot.teacher_initials,
+          teacher: slot.teacher,
           room: slot.room,
           day: slot.day,
           start_time: slot.start_time,
@@ -250,7 +280,7 @@ export default function SetupPage() {
 
         const { error: slotError } = await supabase.from("schedule_slots").insert({
           subject_id: subject.id,
-          day_of_week: slot.day + 1,
+          day_of_week: slot.day,
           start_time: slot.start_time,
           end_time: slot.end_time,
         });
@@ -330,20 +360,33 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-4 py-10 text-zinc-950">
+    <div className="min-h-screen bg-background px-4 py-10 text-foreground">
       <Toaster />
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-zinc-500">Attendify Setup</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                Attendify Setup
+              </p>
               <h1 className="text-3xl font-semibold tracking-tight">
                 Setup wizard
               </h1>
             </div>
-            <Badge variant="outline">
-              Step {currentStep} of {TOTAL_STEPS}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">
+                Step {currentStep} of {TOTAL_STEPS}
+              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleThemeToggle}
+              >
+                {isDarkMode ? <Sun /> : <Moon />}
+                <span className="sr-only">Toggle theme</span>
+              </Button>
+            </div>
           </div>
 
           <Progress value={progressValue} className="h-2" />
@@ -359,10 +402,10 @@ export default function SetupPage() {
                   key={label}
                   className={`rounded-xl border p-3 ${
                     isActive
-                      ? "border-zinc-900 bg-white"
+                      ? "border-zinc-900 bg-white dark:border-zinc-100 dark:bg-zinc-900"
                       : isComplete
-                        ? "border-emerald-200 bg-emerald-50"
-                        : "border-zinc-200 bg-white/70"
+                        ? "border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/20"
+                        : "border-zinc-200 bg-white/70 dark:border-zinc-800 dark:bg-zinc-900/70"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -371,7 +414,7 @@ export default function SetupPage() {
                       {isComplete ? "Done" : isActive ? "Current" : "Pending"}
                     </Badge>
                   </div>
-                  <p className="mt-2 text-sm text-zinc-600">{label}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">{label}</p>
                 </div>
               );
             })}
@@ -379,7 +422,7 @@ export default function SetupPage() {
         </div>
 
         {currentStep === 1 && (
-          <Card className="bg-white">
+          <Card>
             <CardHeader>
               <CardTitle>Create Semester</CardTitle>
               <CardDescription>
@@ -433,7 +476,7 @@ export default function SetupPage() {
         )}
 
         {currentStep === 2 && (
-          <Card className="bg-white">
+          <Card>
             <CardHeader>
               <CardTitle>Select Branch</CardTitle>
               <CardDescription>
@@ -452,13 +495,13 @@ export default function SetupPage() {
                     className={`rounded-xl border p-5 text-left transition-colors ${
                       isSelected
                         ? "border-zinc-950 bg-zinc-950 text-white"
-                        : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+                        : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
                     }`}
                   >
                     <p className="text-base font-semibold">{branch}</p>
                     <p
                       className={`mt-1 text-sm ${
-                        isSelected ? "text-zinc-200" : "text-zinc-500"
+                        isSelected ? "text-zinc-200" : "text-muted-foreground"
                       }`}
                     >
                       Extract only classes for {branch}.
@@ -483,7 +526,7 @@ export default function SetupPage() {
         )}
 
         {currentStep === 3 && (
-          <Card className="bg-white">
+          <Card>
             <CardHeader>
               <CardTitle>Upload Timetable</CardTitle>
               <CardDescription>
@@ -496,13 +539,13 @@ export default function SetupPage() {
                 <Input
                   id="timetable-photo"
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.pdf,application/pdf"
                   onChange={handleTimetableUpload}
                 />
               </div>
 
               {previewUrl ? (
-                <div className="overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100">
+                <div className="overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={previewUrl}
@@ -511,7 +554,7 @@ export default function SetupPage() {
                   />
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-10 text-center text-sm text-zinc-500">
+                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-10 text-center text-sm text-muted-foreground dark:border-zinc-700 dark:bg-zinc-900">
                   Upload an image to preview it here.
                 </div>
               )}
@@ -524,9 +567,9 @@ export default function SetupPage() {
                       {parsedSlots.filter((slot) => slot.checked).length} selected
                     </Badge>
                   </div>
-                  <div className="overflow-x-auto rounded-xl border border-zinc-200">
+                  <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                     <table className="min-w-full text-left text-sm">
-                      <thead className="bg-zinc-50 text-zinc-600">
+                      <thead className="bg-zinc-50 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                         <tr>
                           <th className="px-4 py-3 font-medium">Use</th>
                           <th className="px-4 py-3 font-medium">Subject</th>
@@ -538,7 +581,10 @@ export default function SetupPage() {
                       </thead>
                       <tbody>
                         {parsedSlots.map((slot) => (
-                          <tr key={slot.id} className="border-t border-zinc-200">
+                          <tr
+                            key={slot.id}
+                            className="border-t border-zinc-200 dark:border-zinc-800"
+                          >
                             <td className="px-4 py-3">
                               <input
                                 type="checkbox"
@@ -550,7 +596,7 @@ export default function SetupPage() {
                             <td className="px-4 py-3">{slot.subject_code}</td>
                             <td className="px-4 py-3">{slot.subject_code}</td>
                             <td className="px-4 py-3">
-                              {dayLabels[slot.day] ?? `Day ${slot.day}`}
+                              {dayLabels[slot.day - 1] ?? `Day ${slot.day}`}
                             </td>
                             <td className="px-4 py-3">{slot.start_time}</td>
                             <td className="px-4 py-3">{slot.end_time}</td>
@@ -595,7 +641,7 @@ export default function SetupPage() {
         )}
 
         {currentStep === 4 && (
-          <Card className="bg-white">
+          <Card>
             <CardHeader>
               <CardTitle>Upload Holiday List</CardTitle>
               <CardDescription>
@@ -605,7 +651,7 @@ export default function SetupPage() {
             <CardContent className="space-y-6">
               <form
                 onSubmit={handleAddHoliday}
-                className="grid gap-4 rounded-xl border border-zinc-200 p-4 sm:grid-cols-[1fr_1.4fr_auto]"
+                className="grid gap-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 sm:grid-cols-[1fr_1.4fr_auto]"
               >
                 <div className="space-y-2">
                   <Label htmlFor="holiday-date">Date</Label>
@@ -647,18 +693,20 @@ export default function SetupPage() {
                     {holidays.map((holiday) => (
                       <div
                         key={holiday.id}
-                        className="flex flex-col justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:flex-row sm:items-center"
+                        className="flex flex-col justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center"
                       >
                         <div>
                           <p className="font-medium">{holiday.reason}</p>
-                          <p className="text-sm text-zinc-500">{holiday.date}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {holiday.date}
+                          </p>
                         </div>
                         <Badge variant="secondary">Holiday</Badge>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
+                  <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-muted-foreground dark:border-zinc-700 dark:bg-zinc-900">
                     No holidays added yet.
                   </div>
                 )}
@@ -676,7 +724,7 @@ export default function SetupPage() {
         )}
 
         {currentStep === 5 && (
-          <Card className="bg-white">
+          <Card>
             <CardHeader>
               <CardTitle>Done</CardTitle>
               <CardDescription>
@@ -684,25 +732,25 @@ export default function SetupPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm text-zinc-500">Semester</p>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-sm text-muted-foreground">Semester</p>
                 <p className="mt-1 font-medium">
                   {savedSemester?.name ?? semesterName}
                 </p>
               </div>
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm text-zinc-500">Date range</p>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-sm text-muted-foreground">Date range</p>
                 <p className="mt-1 font-medium">
                   {(savedSemester?.start_date ?? semesterStartDate) || "-"} to{" "}
                   {(savedSemester?.end_date ?? semesterEndDate) || "-"}
                 </p>
               </div>
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm text-zinc-500">Branch</p>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-sm text-muted-foreground">Branch</p>
                 <p className="mt-1 font-medium">{selectedBranch ?? "-"}</p>
               </div>
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm text-zinc-500">Holidays</p>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-sm text-muted-foreground">Holidays</p>
                 <p className="mt-1 font-medium">{holidays.length}</p>
               </div>
             </CardContent>
