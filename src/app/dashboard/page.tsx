@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, MoreVertical } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +71,10 @@ type AttendanceRow = {
   status: AttendanceStatus;
 };
 
+type CalendarAttendanceRow = AttendanceRow & {
+  date: string;
+};
+
 type DayOverride = {
   id: string;
   slot_id: string;
@@ -110,8 +114,43 @@ type AlertItem = {
   message: string;
 };
 
+type CalendarSlotRow = {
+  id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  subject_code?: string;
+  subjects:
+    | {
+        name: string;
+        code: string;
+      }
+    | {
+        name: string;
+        code: string;
+      }[];
+};
+
+type CalendarClass = {
+  id: string;
+  dayOfWeek: number;
+  subjectName: string;
+  subjectCode: string;
+  startTime: string;
+  endTime: string;
+  timeRange: string;
+};
+
 function getAlertKey(alert: AlertItem) {
   return `${alert.subjectName}:${alert.type}:${alert.message}`;
+}
+
+function formatLocalDateIso(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
 function formatDisplayDate(date: Date) {
@@ -189,6 +228,63 @@ function timeToMinutes(time: string) {
   return hours * 60 + minutes;
 }
 
+function formatMonthLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function buildCalendarDays(displayedMonth: Date) {
+  const monthStart = new Date(
+    displayedMonth.getFullYear(),
+    displayedMonth.getMonth(),
+    1
+  );
+  const calendarStart = new Date(monthStart);
+  calendarStart.setDate(monthStart.getDate() - monthStart.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(calendarStart);
+    day.setDate(calendarStart.getDate() + index);
+    return day;
+  });
+}
+
+function getCalendarDotClass(status: AttendanceStatus) {
+  if (status === "present") {
+    return "bg-emerald-500";
+  }
+
+  if (status === "absent") {
+    return "bg-red-500";
+  }
+
+  if (status === "cancelled") {
+    return "bg-zinc-400";
+  }
+
+  return "bg-zinc-300";
+}
+
+function getAttendanceStatusLabel(status: AttendanceStatus | null) {
+  if (status === "present") {
+    return "Present";
+  }
+
+  if (status === "absent") {
+    return "Absent";
+  }
+
+  if (status === "cancelled") {
+    return "Cancelled";
+  }
+
+  return "No record";
+}
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 export default function DashboardPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
   const hasAutoMarked = useRef(false);
@@ -206,10 +302,24 @@ export default function DashboardPage() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [readAlerts, setReadAlerts] = useState<Set<string>>(new Set());
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const [displayedMonth, setDisplayedMonth] = useState(() => {
+    const currentDate = new Date();
+    return new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+  });
+  const [calendarClasses, setCalendarClasses] = useState<CalendarClass[]>([]);
+  const [calendarAttendance, setCalendarAttendance] = useState<
+    CalendarAttendanceRow[]
+  >([]);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(
+    null
+  );
+  const [isCalendarLoading, setIsCalendarLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
   const todayIso = today.toISOString().split("T")[0];
+  const localTodayIso = formatLocalDateIso(today);
   const headerDate = formatDisplayDate(today);
 
   useEffect(() => {
@@ -643,6 +753,98 @@ export default function DashboardPage() {
     void loadDashboard();
   }, [supabase, todayDayOfWeek, todayIso]);
 
+  useEffect(() => {
+    async function loadCalendarData() {
+      if (!activeSemester) {
+        setCalendarClasses([]);
+        setCalendarAttendance([]);
+        setCalendarError(null);
+        setIsCalendarLoading(false);
+        return;
+      }
+
+      setIsCalendarLoading(true);
+      setCalendarError(null);
+
+      try {
+        const { data: slotRows, error: slotError } = await supabase
+          .from("schedule_slots")
+          .select("id, day_of_week, start_time, end_time, subjects(name, code)")
+          .eq("subjects.semester_id", activeSemester.id)
+          .order("day_of_week", { ascending: true })
+          .order("start_time", { ascending: true });
+
+        if (slotError) {
+          throw slotError;
+        }
+
+        const typedSlots = (slotRows ?? []) as CalendarSlotRow[];
+
+        setCalendarClasses(
+          typedSlots.map((slot) => {
+            const subject = Array.isArray(slot.subjects)
+              ? slot.subjects[0]
+              : slot.subjects;
+
+            return {
+              id: slot.id,
+              dayOfWeek: slot.day_of_week,
+              subjectName:
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (slot.subjects as any)?.name ?? slot.subject_code ?? "Unnamed",
+              subjectCode: subject?.code ?? "",
+              startTime: slot.start_time,
+              endTime: slot.end_time,
+              timeRange: formatTimeRange(slot.start_time, slot.end_time),
+            };
+          })
+        );
+
+        const slotIds = typedSlots.map((slot) => slot.id);
+
+        if (!slotIds.length) {
+          setCalendarAttendance([]);
+          return;
+        }
+
+        const monthStartIso = formatLocalDateIso(
+          new Date(displayedMonth.getFullYear(), displayedMonth.getMonth(), 1)
+        );
+        const monthEndIso = formatLocalDateIso(
+          new Date(displayedMonth.getFullYear(), displayedMonth.getMonth() + 1, 0)
+        );
+
+        const { data: attendanceRows, error: attendanceError } = await supabase
+          .from("attendance_records")
+          .select("slot_id, date, status")
+          .in("slot_id", slotIds)
+          .gte("date", monthStartIso)
+          .lte("date", monthEndIso);
+
+        if (attendanceError) {
+          throw attendanceError;
+        }
+
+        setCalendarAttendance(
+          ((attendanceRows ?? []) as CalendarAttendanceRow[]).sort((left, right) =>
+            left.date.localeCompare(right.date)
+          )
+        );
+      } catch (loadError) {
+        console.error("Failed to load calendar:", loadError);
+        setCalendarError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load calendar"
+        );
+      } finally {
+        setIsCalendarLoading(false);
+      }
+    }
+
+    void loadCalendarData();
+  }, [activeSemester, displayedMonth, supabase]);
+
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
@@ -873,6 +1075,29 @@ export default function DashboardPage() {
   const unreadAlertCount = alerts.filter(
     (alert) => !readAlerts.has(getAlertKey(alert))
   ).length;
+  const calendarDays = buildCalendarDays(displayedMonth);
+  const attendanceByDate = new Map<string, CalendarAttendanceRow[]>();
+  const attendanceBySlotDate = new Map<string, AttendanceStatus>();
+
+  for (const record of calendarAttendance) {
+    const currentRecords = attendanceByDate.get(record.date) ?? [];
+    currentRecords.push(record);
+    attendanceByDate.set(record.date, currentRecords);
+    attendanceBySlotDate.set(`${record.date}:${record.slot_id}`, record.status);
+  }
+
+  const selectedCalendarDateObject = selectedCalendarDate
+    ? new Date(`${selectedCalendarDate}T00:00:00`)
+    : null;
+  const selectedCalendarClasses = selectedCalendarDateObject
+    ? calendarClasses
+        .filter((item) => item.dayOfWeek === selectedCalendarDateObject.getDay())
+        .map((item) => ({
+          ...item,
+          status:
+            attendanceBySlotDate.get(`${selectedCalendarDate}:${item.id}`) ?? null,
+        }))
+    : [];
 
   return (
     <div className="min-h-screen bg-zinc-50 px-4 py-8 text-zinc-950">
@@ -984,6 +1209,7 @@ export default function DashboardPage() {
           <TabsList>
             <TabsTrigger value="today">Today</TabsTrigger>
             <TabsTrigger value="stats">Stats</TabsTrigger>
+            <TabsTrigger value="calendar">Calendar</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="space-y-4">
@@ -1219,6 +1445,179 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="calendar" className="space-y-4">
+            <Card className="bg-white">
+              <CardHeader className="gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle>{formatMonthLabel(displayedMonth)}</CardTitle>
+                  <CardDescription>
+                    Monthly attendance overview for the active semester
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => {
+                      setDisplayedMonth(
+                        new Date(
+                          displayedMonth.getFullYear(),
+                          displayedMonth.getMonth() - 1,
+                          1
+                        )
+                      );
+                      setSelectedCalendarDate(null);
+                    }}
+                  >
+                    <ChevronLeft />
+                    <span className="sr-only">Previous month</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => {
+                      setDisplayedMonth(
+                        new Date(
+                          displayedMonth.getFullYear(),
+                          displayedMonth.getMonth() + 1,
+                          1
+                        )
+                      );
+                      setSelectedCalendarDate(null);
+                    }}
+                  >
+                    <ChevronRight />
+                    <span className="sr-only">Next month</span>
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {calendarError ? (
+                  <p className="text-sm text-red-600">{calendarError}</p>
+                ) : null}
+
+                <div className="grid grid-cols-7 gap-2">
+                  {WEEKDAY_LABELS.map((label) => (
+                    <div
+                      key={label}
+                      className="px-2 text-center text-xs font-semibold uppercase tracking-wide text-zinc-500"
+                    >
+                      {label}
+                    </div>
+                  ))}
+                  {calendarDays.map((day) => {
+                    const dateKey = formatLocalDateIso(day);
+                    const isCurrentMonth =
+                      day.getMonth() === displayedMonth.getMonth() &&
+                      day.getFullYear() === displayedMonth.getFullYear();
+                    const dayRecords = attendanceByDate.get(dateKey) ?? [];
+                    const isSelected = selectedCalendarDate === dateKey;
+                    const isToday = dateKey === localTodayIso;
+
+                    return (
+                      <button
+                        key={dateKey}
+                        type="button"
+                        disabled={!isCurrentMonth}
+                        onClick={() => setSelectedCalendarDate(dateKey)}
+                        className={`min-h-24 rounded-xl border p-2 text-left transition ${
+                          isCurrentMonth
+                            ? "border-zinc-200 bg-white hover:border-zinc-300"
+                            : "border-zinc-100 bg-zinc-50 text-zinc-400"
+                        } ${isSelected ? "ring-2 ring-zinc-900/10" : ""}`}
+                      >
+                        <span
+                          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${
+                            isToday
+                              ? "bg-zinc-900 text-white"
+                              : isCurrentMonth
+                                ? "text-zinc-900"
+                                : "text-zinc-400"
+                          }`}
+                        >
+                          {day.getDate()}
+                        </span>
+                        <div className="mt-3 flex flex-wrap gap-1">
+                          {dayRecords.map((record, index) => (
+                            <span
+                              key={`${record.slot_id}-${record.status}-${index}`}
+                              className={`h-2.5 w-2.5 rounded-full ${getCalendarDotClass(
+                                record.status
+                              )}`}
+                            />
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {isCalendarLoading ? (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6">
+                    <p className="text-sm text-zinc-600">Loading calendar...</p>
+                  </div>
+                ) : selectedCalendarDate ? (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                    <div className="mb-4">
+                      <p className="text-sm font-semibold text-zinc-900">
+                        {formatDisplayDate(
+                          new Date(`${selectedCalendarDate}T00:00:00`)
+                        )}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        {selectedCalendarClasses.length
+                          ? "Classes and attendance status"
+                          : "No classes scheduled for this day"}
+                      </p>
+                    </div>
+
+                    {selectedCalendarClasses.length ? (
+                      <div className="space-y-3">
+                        {selectedCalendarClasses.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div>
+                              <p className="text-sm font-medium text-zinc-900">
+                                {item.subjectName}
+                              </p>
+                              <p className="text-xs text-zinc-500">
+                                {item.subjectCode ? `${item.subjectCode} • ` : ""}
+                                {item.timeRange}
+                              </p>
+                            </div>
+                            <Badge
+                              className={
+                                item.status === "present"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : item.status === "absent"
+                                    ? "bg-red-100 text-red-700"
+                                    : item.status === "cancelled"
+                                      ? "bg-zinc-200 text-zinc-700"
+                                      : "bg-zinc-100 text-zinc-600"
+                              }
+                            >
+                              {getAttendanceStatusLabel(item.status)}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6">
+                    <p className="text-sm text-zinc-600">
+                      Select a day to view its classes and attendance status.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
