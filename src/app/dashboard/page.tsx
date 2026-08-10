@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MoreVertical } from "lucide-react";
+import { Bell, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus } from "@/lib/types";
@@ -101,6 +109,10 @@ type AlertItem = {
   type: "danger" | "warning";
   message: string;
 };
+
+function getAlertKey(alert: AlertItem) {
+  return `${alert.subjectName}:${alert.type}:${alert.message}`;
+}
 
 function formatDisplayDate(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
@@ -192,6 +204,7 @@ export default function DashboardPage() {
   const [pendingSlotIds, setPendingSlotIds] = useState<string[]>([]);
   const [rescheduleSlotId, setRescheduleSlotId] = useState<string | null>(null);
   const [rescheduleTime, setRescheduleTime] = useState("");
+  const [readAlerts, setReadAlerts] = useState<Set<string>>(new Set());
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
   const today = new Date();
@@ -857,17 +870,114 @@ export default function DashboardPage() {
   const selectedRescheduleClass = classes.find(
     (item) => item.id === rescheduleSlotId
   );
+  const unreadAlertCount = alerts.filter(
+    (alert) => !readAlerts.has(getAlertKey(alert))
+  ).length;
 
   return (
     <div className="min-h-screen bg-zinc-50 px-4 py-8 text-zinc-950">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-zinc-500">
-            {activeSemester?.name ?? "Attendify"}
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Today — {headerDate}
-          </h1>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-zinc-500">
+              {activeSemester?.name ?? "Attendify"}
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Today — {headerDate}
+            </h1>
+          </div>
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="relative shrink-0"
+              >
+                <Bell />
+                {unreadAlertCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
+                    {unreadAlertCount}
+                  </span>
+                ) : null}
+                <span className="sr-only">Open notifications</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetHeader>
+                <SheetTitle>Notifications</SheetTitle>
+                <SheetDescription>
+                  Attendance alerts for your dashboard.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex items-center justify-between px-4">
+                <p className="text-sm text-zinc-500">
+                  {alerts.length} alert{alerts.length === 1 ? "" : "s"}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={unreadAlertCount === 0}
+                  onClick={() =>
+                    setReadAlerts(new Set(alerts.map((alert) => getAlertKey(alert))))
+                  }
+                >
+                  Mark all as read
+                </Button>
+              </div>
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+                {alerts.length ? (
+                  alerts.map((alert) => {
+                    const isUnread = !readAlerts.has(getAlertKey(alert));
+
+                    return (
+                      <div
+                        key={getAlertKey(alert)}
+                        className={`rounded-xl border px-4 py-3 ${
+                          alert.type === "danger"
+                            ? "border-red-200 bg-red-50"
+                            : "border-amber-200 bg-amber-50"
+                        }`}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span
+                            className={`text-xs font-semibold uppercase tracking-wide ${
+                              alert.type === "danger"
+                                ? "text-red-700"
+                                : "text-amber-700"
+                            }`}
+                          >
+                            {alert.type}
+                          </span>
+                          {isUnread ? (
+                            <span className="text-xs font-medium text-red-500">
+                              Unread
+                            </span>
+                          ) : (
+                            <span className="text-xs text-zinc-500">Read</span>
+                          )}
+                        </div>
+                        <p
+                          className={`text-sm font-medium ${
+                            alert.type === "danger"
+                              ? "text-red-700"
+                              : "text-amber-700"
+                          }`}
+                        >
+                          {alert.message}
+                        </p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-xl border border-zinc-200 bg-white px-4 py-6">
+                    <p className="text-sm text-zinc-600">No alerts right now</p>
+                  </div>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
 
         <Tabs defaultValue="today" className="gap-4">
