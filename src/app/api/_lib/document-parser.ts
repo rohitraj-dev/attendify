@@ -1,11 +1,3 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
-
 const EXTENSION_TO_MIME_TYPE: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
@@ -76,15 +68,6 @@ export function getValidatedFile(
 export async function toGeminiInlineData(file: File, mimeType: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  if (mimeType === "application/pdf") {
-    const pngBuffer = await convertPdfFirstPageToPng(buffer);
-
-    return {
-      mimeType: "image/png",
-      data: pngBuffer.toString("base64"),
-    };
-  }
-
   return {
     mimeType,
     data: buffer.toString("base64"),
@@ -102,58 +85,4 @@ function detectMimeType(file: File) {
   );
 
   return extension ? EXTENSION_TO_MIME_TYPE[extension] : null;
-}
-
-async function convertPdfFirstPageToPng(pdfBuffer: Buffer) {
-  const sharpBuffer = await tryConvertPdfWithSharp(pdfBuffer);
-
-  if (sharpBuffer) {
-    return sharpBuffer;
-  }
-
-  return convertPdfWithPdftoppm(pdfBuffer);
-}
-
-async function tryConvertPdfWithSharp(pdfBuffer: Buffer) {
-  try {
-    const sharpModule = await import("sharp");
-    return await sharpModule
-      .default(pdfBuffer, { density: 200, page: 0 })
-      .png()
-      .toBuffer();
-  } catch {
-    return null;
-  }
-}
-
-async function convertPdfWithPdftoppm(pdfBuffer: Buffer) {
-  const tempDirectory = await mkdtemp(join(tmpdir(), "attendify-pdf-"));
-  const inputPath = join(tempDirectory, "input.pdf");
-  const outputBasePath = join(tempDirectory, "output");
-  const outputPath = `${outputBasePath}.png`;
-
-  try {
-    await writeFile(inputPath, pdfBuffer);
-    await execFileAsync("pdftoppm", [
-      "-f",
-      "1",
-      "-l",
-      "1",
-      "-singlefile",
-      "-png",
-      inputPath,
-      outputBasePath,
-    ]);
-
-    return await readFile(outputPath);
-  } catch (error) {
-    throw new RouteError(
-      error instanceof Error
-        ? `Failed to convert uploaded PDF: ${error.message}`
-        : "Failed to convert uploaded PDF",
-      500
-    );
-  } finally {
-    await rm(tempDirectory, { force: true, recursive: true });
-  }
 }

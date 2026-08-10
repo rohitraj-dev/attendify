@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const { file, mimeType } = getValidatedFile(
       formData,
-      ["image"],
+      ["file", "image"],
       ALLOWED_TIMETABLE_MIME_TYPES,
       "a PDF or image file (JPG, PNG, or WEBP)"
     );
