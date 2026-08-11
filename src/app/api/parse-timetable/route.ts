@@ -19,12 +19,13 @@ function buildPrompt(branch: string, semesterNumber: string) {
   return `You are parsing a college timetable PDF with multiple semester tables and multiple branch columns.
 
 IMPORTANT:
-- Extract ONLY from the "${semesterNumber} Semester" table
+- The PDF has multiple timetable tables, one for each semester (1st Semester, 3rd Semester, 5th Semester). You MUST find and extract from ONLY the table with heading '${semesterNumber} Semester'. Do not extract from any other semester table.
 - Extract ONLY the "${branch}" column
 - Days are columns: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5
 - Detect time slots from the table rows automatically
 - LAB sessions spanning 2 rows = one slot (start of first row to end of second row)
 - Each cell has subject code + teacher initials
+- All times after 12:50 are PM. Convert to 24-hour: 01:30=13:30, 02:20=14:20, 02:30=14:30, 03:20=15:20, 03:30=15:30, 04:20=16:20, 04:30=16:30, 05:20=17:20
 
 Return ONLY JSON, no explanation:
 {
@@ -41,6 +42,23 @@ Return ONLY JSON, no explanation:
 
 Skip empty cells, LUNCH BREAK, and LIB slots.
 Time format: HH:MM 24-hour.`;
+}
+
+function normalizeTime(t: string): string {
+  let str = t.trim();
+  if (/^\d:\d{2}$/.test(str)) {
+    str = "0" + str;
+  }
+  const match = str.match(/^(\d{2}):(\d{2})$/);
+  if (match) {
+    let hour = parseInt(match[1], 10);
+    const minute = match[2];
+    if (hour >= 1 && hour <= 6) {
+      hour += 12;
+      str = `${hour.toString().padStart(2, "0")}:${minute}`;
+    }
+  }
+  return str;
 }
 
 function normalizeSlot(slot: unknown) {
@@ -63,12 +81,16 @@ function normalizeSlot(slot: unknown) {
     throw new RouteError("Gemini returned a slot with an invalid day value", 502);
   }
 
-  if (
-    typeof rawSlot.start_time !== "string" ||
-    !/^\d{2}:\d{2}$/.test(rawSlot.start_time) ||
-    typeof rawSlot.end_time !== "string" ||
-    !/^\d{2}:\d{2}$/.test(rawSlot.end_time)
-  ) {
+  const startTime =
+    typeof rawSlot.start_time === "string"
+      ? normalizeTime(rawSlot.start_time)
+      : "";
+  const endTime =
+    typeof rawSlot.end_time === "string"
+      ? normalizeTime(rawSlot.end_time)
+      : "";
+
+  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
     throw new RouteError("Gemini returned a slot with an invalid time value", 502);
   }
 
@@ -81,8 +103,8 @@ function normalizeSlot(slot: unknown) {
 
   return {
     day: normalizedDay,
-    start_time: rawSlot.start_time,
-    end_time: rawSlot.end_time,
+    start_time: startTime,
+    end_time: endTime,
     subject_code: rawSlot.subject_code.trim(),
     teacher,
     room: typeof rawSlot.room === "string" ? rawSlot.room.trim() : "",
@@ -129,14 +151,38 @@ export async function POST(request: Request) {
 
     const responseText = result.response.text();
     console.log("GEMINI RAW RESPONSE:", responseText);
-    const jsonText = extractJsonObject(responseText);
-    const parsed = JSON.parse(jsonText) as { slots?: unknown };
 
-    if (!parsed || !Array.isArray(parsed.slots)) {
-      throw new RouteError("Gemini response did not include a slots array", 502);
+    const cleanedText = responseText
+      .replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1")
+      .trim();
+
+    let rawSlots: unknown[];
+
+    const arrayMatch = cleanedText.match(/\[[\s\S]*\]/);
+    const objectMatch = cleanedText.match(/\{[\s\S]*\}/);
+
+    if (
+      cleanedText.startsWith("[") ||
+      (arrayMatch && (!objectMatch || cleanedText.indexOf("[") < cleanedText.indexOf("{")))
+    ) {
+      if (!arrayMatch) {
+        throw new RouteError("Gemini response was not valid JSON array text", 502);
+      }
+      rawSlots = JSON.parse(arrayMatch[0]) as unknown[];
+    } else {
+      const jsonText = extractJsonObject(responseText);
+      const parsed = JSON.parse(jsonText) as { slots?: unknown[] };
+      if (!parsed || !Array.isArray(parsed.slots)) {
+        throw new RouteError("Gemini response did not include a slots array", 502);
+      }
+      rawSlots = parsed.slots;
     }
 
-    const slots = parsed.slots.map((slot) => normalizeSlot(slot));
+    if (!Array.isArray(rawSlots)) {
+      throw new RouteError("Gemini response did not contain a slots array", 502);
+    }
+
+    const slots = rawSlots.map((slot) => normalizeSlot(slot));
 
     return Response.json({ success: true, slots });
   } catch (error) {
