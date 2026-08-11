@@ -1,0 +1,29 @@
+{
+  "college": "BIT Mesra, Deoghar Campus",
+  "branch": "BCA",
+  "semesterNumber": "3rd",
+  "slots": [
+    { "day": 1, "start_time": "10:00", "end_time": "10:50", "subject_code": "DBMS", "teacher": "Arvind", "room": "302" },
+    { "day": 1, "start_time": "11:00", "end_time": "11:50", "subject_code": "MFC-II", "teacher": "Amit", "room": "302" },
+    { "day": 1, "start_time": "12:00", "end_time": "12:50", "subject_code": "OOPJ", "teacher": "Saunak", "room": "302" },
+
+    { "day": 2, "start_time": "09:00", "end_time": "11:50", "subject_code": "PSCW", "teacher": "Kankan", "room": "SIM LAB" },
+    { "day": 2, "start_time": "12:00", "end_time": "12:50", "subject_code": "COA", "teacher": "Anindan", "room": "302" },
+    { "day": 2, "start_time": "15:30", "end_time": "17:20", "subject_code": "SWR LAB", "teacher": "Anindan", "room": "LAB 2" },
+
+    { "day": 3, "start_time": "10:00", "end_time": "10:50", "subject_code": "MFC-II", "teacher": "Amit", "room": "302" },
+    { "day": 3, "start_time": "11:00", "end_time": "11:50", "subject_code": "SWR", "teacher": "Dibyasundar", "room": "321" },
+    { "day": 3, "start_time": "12:00", "end_time": "12:50", "subject_code": "OOPJ", "teacher": "Saunak", "room": "302" },
+    { "day": 3, "start_time": "14:30", "end_time": "17:20", "subject_code": "OOPJ LAB", "teacher": "Saunak", "room": "LAB 1" },
+
+    { "day": 4, "start_time": "09:00", "end_time": "09:50", "subject_code": "COA", "teacher": "Anindan", "room": "302" },
+    { "day": 4, "start_time": "10:00", "end_time": "10:50", "subject_code": "MFC-II", "teacher": "Amit", "room": "302" },
+    { "day": 4, "start_time": "11:00", "end_time": "11:50", "subject_code": "DBMS", "teacher": "Arvind", "room": "302" },
+    { "day": 4, "start_time": "12:00", "end_time": "12:50", "subject_code": "OOPJ", "teacher": "Saunak", "room": "302" },
+
+    { "day": 5, "start_time": "10:00", "end_time": "10:50", "subject_code": "SWR", "teacher": "Dibyasundar", "room": "309" },
+    { "day": 5, "start_time": "11:00", "end_time": "11:50", "subject_code": "DBMS", "teacher": "Amit", "room": "302" },
+    { "day": 5, "start_time": "12:00", "end_time": "12:50", "subject_code": "COA", "teacher": "Arvind", "room": "302" },
+    { "day": 5, "start_time": "15:30", "end_time": "17:20", "subject_code": "DBMS LAB", "teacher": "Arvind", "room": "LAB 3" }
+  ]
+}

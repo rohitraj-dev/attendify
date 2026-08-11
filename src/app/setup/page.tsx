@@ -67,6 +67,7 @@ export default function SetupPage() {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [usePreset, setUsePreset] = useState(false);
   const [isSavingSemester, setIsSavingSemester] = useState(false);
   const [isParsingTimetable, setIsParsingTimetable] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
@@ -166,6 +167,43 @@ export default function SetupPage() {
     setTimetableFile(file);
     setPreviewUrl(nextPreviewUrl);
     setParsedSlots([]);
+  }
+
+  async function handleLoadPreset() {
+    if (!selectedBranch || !semesterNumber) {
+      toast.error("Select branch and semester first");
+      return;
+    }
+    setIsParsingTimetable(true);
+    try {
+      const params = new URLSearchParams({
+        college: "BIT Mesra, Deoghar Campus",
+        branch: selectedBranch,
+        semesterNumber: semesterNumber,
+      });
+      const response = await fetch(`/api/preset-timetable?${params.toString()}`);
+      const payload = await response.json() as { success: boolean; slots?: Array<{ subject_code: string; teacher: string; room: string; day: number; start_time: string; end_time: string }>; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error ?? "No preset found for this combination");
+      }
+      setParsedSlots(
+        (payload.slots ?? []).map((slot) => ({
+          id: crypto.randomUUID(),
+          subject_code: slot.subject_code,
+          teacher: slot.teacher,
+          room: slot.room,
+          day: slot.day,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          checked: true,
+        }))
+      );
+      toast.success("Preset timetable loaded — review and save");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load preset");
+    } finally {
+      setIsParsingTimetable(false);
+    }
   }
 
   async function handleParseTimetable() {
@@ -585,6 +623,14 @@ export default function SetupPage() {
                   onClick={() => setCurrentStep(4)}
                 >
                   Skip
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isParsingTimetable || isSavingSchedule}
+                  onClick={() => void handleLoadPreset()}
+                >
+                  Use Preset Timetable
                 </Button>
                 <Button
                   type="button"
