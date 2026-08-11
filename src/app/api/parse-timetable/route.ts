@@ -16,32 +16,44 @@ const ALLOWED_TIMETABLE_MIME_TYPES = [
 ];
 
 function buildPrompt(branch: string, semesterNumber: string) {
-  return `You are parsing a college timetable PDF with multiple semester tables and multiple branch columns.
+  return `You are extracting a class schedule from a college timetable document.
 
-IMPORTANT:
-- The PDF has multiple timetable tables, one for each semester (1st Semester, 3rd Semester, 5th Semester). You MUST find and extract from ONLY the table with heading '${semesterNumber} Semester'. Do not extract from any other semester table.
-- Extract ONLY the "${branch}" column
-- Days are columns: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5
-- Detect time slots from the table rows automatically
-- LAB sessions spanning 2 rows = one slot (start of first row to end of second row)
+The document contains MULTIPLE timetable tables — one for each semester (1st Semester, 3rd Semester, 5th Semester, etc.).
+
+STEP 1 — Find the correct table:
+- Scan all table headings/titles in the document.
+- Find the table whose heading contains "${semesterNumber} Semester" (e.g. "3rd Semester").
+- If you cannot find an exact match, look for the ordinal number (e.g. "3rd", "Third", "III").
+- ONLY use that table. Completely ignore all other semester tables.
+
+STEP 2 — Find the correct column:
+- Inside the "${semesterNumber} Semester" table, find the column labeled "${branch}".
+- Extract ONLY that column's data.
+
+STEP 3 — Extract slots:
+- Rows represent time slots (e.g. 09:00–09:50, 10:00–10:50, etc.)
+- Columns represent days: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5
 - Each cell has subject code + teacher initials
-- All times after 12:50 are PM. Convert to 24-hour: 01:30=13:30, 02:20=14:20, 02:30=14:30, 03:20=15:20, 03:30=15:30, 04:20=16:20, 04:30=16:30, 05:20=17:20
+- LAB sessions spanning 2 consecutive rows = one slot (start of first row to end of second row)
+- Skip empty cells, LUNCH BREAK, LIB, and any free slots
 
-Return ONLY JSON, no explanation:
+STEP 4 — Fix times:
+- Times shown as 01:xx to 06:xx in the afternoon MUST be converted to 24-hour format
+- 01:00=13:00, 01:30=13:30, 02:00=14:00, 02:30=14:30, 03:00=15:00, 03:30=15:30, 04:00=16:00, 04:30=16:30, 05:00=17:00
+- Morning times (09:xx, 10:xx, 11:xx, 12:xx) stay as-is
+
+Return ONLY this JSON, no explanation, no markdown:
 {
   "slots": [
     {
       "day": 1,
       "start_time": "09:00",
-      "end_time": "09:50", 
+      "end_time": "09:50",
       "subject_code": "CA",
-      "teacher": "teacher initials"
+      "teacher": "AB"
     }
   ]
-}
-
-Skip empty cells, LUNCH BREAK, and LIB slots.
-Time format: HH:MM 24-hour.`;
+}`;
 }
 
 function normalizeTime(t: string): string {
