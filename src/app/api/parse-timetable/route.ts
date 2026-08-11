@@ -128,6 +128,7 @@ export async function POST(request: Request) {
     ]);
 
     const responseText = result.response.text();
+    console.log("GEMINI RAW RESPONSE:", responseText);
     const jsonText = extractJsonObject(responseText);
     const parsed = JSON.parse(jsonText) as { slots?: unknown };
 
