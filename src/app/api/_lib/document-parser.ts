@@ -16,21 +16,29 @@ export class RouteError extends Error {
   }
 }
 
-export function extractJsonObject(text: string) {
-  const trimmed = text.trim();
+export function extractJsonObject(text: string): string {
+  // Strip markdown code fences if present (e.g. ```json ... ``` or ``` ... ```)
+  const stripped = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
 
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    return trimmed;
-  }
-
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-
-  if (start === -1 || end === -1 || end <= start) {
+  // Use regex to find the first { and last } and extract everything between them
+  const match = stripped.match(/\{[\s\S]*\}/);
+  if (!match) {
     throw new RouteError("Model response was not valid JSON object text", 502);
   }
 
-  return trimmed.slice(start, end + 1);
+  return match[0];
+}
+
+export function extractJSON<T = unknown>(text: string): T {
+  const jsonStr = extractJsonObject(text);
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch (error) {
+    throw new RouteError(
+      `Model response contained invalid JSON: ${error instanceof Error ? error.message : "Parse error"}`,
+      502
+    );
+  }
 }
 
 export function getValidatedFile(
