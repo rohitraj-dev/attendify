@@ -67,11 +67,14 @@ type SlotRow = {
     | {
         name: string;
         code: string;
+        semester_id?: string;
       }
     | {
         name: string;
         code: string;
-      }[];
+        semester_id?: string;
+      }[]
+    | null;
 };
 
 type AttendanceRow = {
@@ -132,11 +135,14 @@ type CalendarSlotRow = {
     | {
         name: string;
         code: string;
+        semester_id?: string;
       }
     | {
         name: string;
         code: string;
-      }[];
+        semester_id?: string;
+      }[]
+    | null;
 };
 
 type CalendarClass = {
@@ -653,6 +659,7 @@ export default function DashboardPage() {
           .eq("user_id", PHASE_ONE_USER_ID)
           .lte("start_date", todayIso)
           .gte("end_date", todayIso)
+          .order("start_date", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -674,16 +681,22 @@ export default function DashboardPage() {
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
-          .select("*, subjects(name, code)")
+          .select("*, subjects(name, code, semester_id)")
           .eq("day_of_week", todayDayOfWeek)
-          .eq("subjects.semester_id", semester.id)
           .order("start_time", { ascending: true });
 
         if (slotsError) {
           throw slotsError;
         }
 
-        const typedSlots = (slotRows ?? []) as SlotRow[];
+        const rawSlots = (slotRows ?? []) as SlotRow[];
+        const typedSlots = rawSlots.filter((slot) => {
+          if (!slot.subjects) return false;
+          const subject = Array.isArray(slot.subjects)
+            ? slot.subjects[0]
+            : slot.subjects;
+          return Boolean(subject && subject.semester_id === semester.id);
+        });
 
         if (!typedSlots.length) {
           setClasses([]);
@@ -791,8 +804,7 @@ export default function DashboardPage() {
       try {
         const { data: slotRows, error: slotError } = await supabase
           .from("schedule_slots")
-          .select("id, day_of_week, start_time, end_time, subjects(name, code)")
-          .eq("subjects.semester_id", activeSemester.id)
+          .select("id, day_of_week, start_time, end_time, subjects(name, code, semester_id)")
           .order("day_of_week", { ascending: true })
           .order("start_time", { ascending: true });
 
@@ -800,7 +812,14 @@ export default function DashboardPage() {
           throw slotError;
         }
 
-        const typedSlots = (slotRows ?? []) as CalendarSlotRow[];
+        const rawSlots = (slotRows ?? []) as CalendarSlotRow[];
+        const typedSlots = rawSlots.filter((slot) => {
+          if (!slot.subjects) return false;
+          const subject = Array.isArray(slot.subjects)
+            ? slot.subjects[0]
+            : slot.subjects;
+          return Boolean(subject && subject.semester_id === activeSemester.id);
+        });
 
         setCalendarClasses(
           typedSlots.map((slot) => {
