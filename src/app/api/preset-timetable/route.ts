@@ -4,11 +4,15 @@ import fs from "fs";
 
 export const runtime = "nodejs";
 
+const PRESET_MAP: Record<string, string> = {
+  "bit-mesra-deoghar-campus|bca|3rd": "bit-mesra-deoghar-bca-3rd",
+};
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const college = searchParams.get("college");
-  const branch = searchParams.get("branch");
-  const semesterNumber = searchParams.get("semesterNumber");
+  const college = (searchParams.get("college") ?? "").toLowerCase().trim();
+  const branch = (searchParams.get("branch") ?? "").toLowerCase().trim();
+  const semesterNumber = (searchParams.get("semesterNumber") ?? "").toLowerCase().trim();
 
   if (!college || !branch || !semesterNumber) {
     return Response.json(
@@ -17,17 +21,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Build filename from params
-  const slug = `${college}-${branch}-${semesterNumber}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+  const collegeSlug = college.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const key = `${collegeSlug}|${branch}|${semesterNumber}`;
+  const fileName = PRESET_MAP[key];
 
-  const filePath = path.join(process.cwd(), "src", "presets", `${slug}.json`);
+  if (!fileName) {
+    return Response.json(
+      { success: false, error: `No preset found for: ${key}` },
+      { status: 404 }
+    );
+  }
+
+  const filePath = path.join(process.cwd(), "src", "presets", `${fileName}.json`);
 
   if (!fs.existsSync(filePath)) {
     return Response.json(
-      { success: false, error: "No preset found for this combination" },
+      { success: false, error: "Preset file missing on server" },
       { status: 404 }
     );
   }
