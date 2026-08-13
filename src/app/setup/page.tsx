@@ -137,6 +137,7 @@ export default function SetupPage() {
       }
 
       setSavedSemester(data);
+      localStorage.setItem("activeSemesterId", data.id);
       setCurrentStep(2);
       toast.success("Semester created");
     } catch (error) {
