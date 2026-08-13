@@ -55,6 +55,7 @@ const THEME_STORAGE_KEY = "attendify-theme";
 type ActiveSemester = {
   id: string;
   name: string;
+  start_date: string;
   end_date: string;
 };
 
@@ -353,7 +354,9 @@ export default function DashboardPage() {
   useEffect(() => {
     async function autoMarkPastSlots(
       slots: SlotRow[],
-      overrideMap: Record<string, DayOverride>
+      overrideMap: Record<string, DayOverride>,
+      activeSemester: ActiveSemester,
+      statSlots: Array<{ id: string; subject_id: string; day_of_week: number }>
     ) {
       if (hasAutoMarked.current) {
         return;
@@ -383,48 +386,122 @@ export default function DashboardPage() {
         return currentMinutes > effectiveEndMinutes;
       });
 
-      if (!pastSlots.length) {
-        return;
+      if (pastSlots.length) {
+        const pastSlotIds = pastSlots.map((slot) => slot.id);
+        const { data: existingAttendance, error: existingAttendanceError } =
+          await supabase
+            .from("attendance_records")
+            .select("slot_id")
+            .eq("date", todayIso)
+            .in("slot_id", pastSlotIds);
+
+        if (existingAttendanceError) {
+          throw existingAttendanceError;
+        }
+
+        const existingSlotIds = new Set(
+          (existingAttendance ?? []).map((record) => record.slot_id)
+        );
+
+        const slotsToInsert = pastSlots
+          .filter((slot) => !existingSlotIds.has(slot.id))
+          .map((slot) => ({
+            slot_id: slot.id,
+            date: todayIso,
+            status: "present" as const,
+            marked_by: "auto" as const,
+          }));
+
+        if (slotsToInsert.length) {
+          const { error: upsertError } = await supabase
+            .from("attendance_records")
+            .upsert(slotsToInsert, {
+              onConflict: "slot_id,date",
+              ignoreDuplicates: true,
+            });
+
+          if (upsertError) {
+            throw upsertError;
+          }
+        }
       }
 
-      const pastSlotIds = pastSlots.map((slot) => slot.id);
-      const { data: existingAttendance, error: existingAttendanceError } =
-        await supabase
-          .from("attendance_records")
-          .select("slot_id")
-          .eq("date", todayIso)
-          .in("slot_id", pastSlotIds);
+      if (activeSemester.start_date && statSlots.length > 0) {
+        const yesterdayDate = new Date(`${todayIso}T00:00:00`);
+        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+        const yesterdayIso = formatLocalDateIso(yesterdayDate);
 
-      if (existingAttendanceError) {
-        throw existingAttendanceError;
-      }
+        if (activeSemester.start_date <= yesterdayIso) {
+          const pastDates: Array<{ dateIso: string; dayOfWeek: number }> = [];
+          const currDate = new Date(`${activeSemester.start_date}T00:00:00`);
+          const endDate = new Date(`${yesterdayIso}T00:00:00`);
 
-      const existingSlotIds = new Set(
-        (existingAttendance ?? []).map((record) => record.slot_id)
-      );
+          while (currDate <= endDate) {
+            const dow = currDate.getDay();
+            if (dow !== 0 && dow !== 6) {
+              pastDates.push({
+                dateIso: formatLocalDateIso(currDate),
+                dayOfWeek: dow,
+              });
+            }
+            currDate.setDate(currDate.getDate() + 1);
+          }
 
-      const slotsToInsert = pastSlots
-        .filter((slot) => !existingSlotIds.has(slot.id))
-        .map((slot) => ({
-          slot_id: slot.id,
-          date: todayIso,
-          status: "present" as const,
-          marked_by: "auto" as const,
-        }));
+          if (pastDates.length > 0) {
+            const candidateBackfills: Array<{ slot_id: string; date: string }> = [];
+            for (const { dateIso, dayOfWeek } of pastDates) {
+              const matchingSlots = statSlots.filter(
+                (s) => s.day_of_week === dayOfWeek
+              );
+              for (const slot of matchingSlots) {
+                candidateBackfills.push({ slot_id: slot.id, date: dateIso });
+              }
+            }
 
-      if (!slotsToInsert.length) {
-        return;
-      }
+            const allSlotIds = Array.from(
+              new Set(statSlots.map((s) => s.id))
+            );
 
-      const { error: upsertError } = await supabase
-        .from("attendance_records")
-        .upsert(slotsToInsert, {
-          onConflict: "slot_id,date",
-          ignoreDuplicates: true,
-        });
+            if (allSlotIds.length > 0 && candidateBackfills.length > 0) {
+              const { data: existingRecords, error: existingErr } = await supabase
+                .from("attendance_records")
+                .select("slot_id, date")
+                .in("slot_id", allSlotIds)
+                .gte("date", activeSemester.start_date)
+                .lte("date", yesterdayIso);
 
-      if (upsertError) {
-        throw upsertError;
+              if (existingErr) {
+                throw existingErr;
+              }
+
+              const existingSet = new Set(
+                (existingRecords ?? []).map((r) => `${r.slot_id}:${r.date}`)
+              );
+
+              const backfillInserts = candidateBackfills
+                .filter((item) => !existingSet.has(`${item.slot_id}:${item.date}`))
+                .map((item) => ({
+                  slot_id: item.slot_id,
+                  date: item.date,
+                  status: "present" as const,
+                  marked_by: "auto" as const,
+                }));
+
+              if (backfillInserts.length > 0) {
+                const { error: backfillUpsertErr } = await supabase
+                  .from("attendance_records")
+                  .upsert(backfillInserts, {
+                    onConflict: "slot_id,date",
+                    ignoreDuplicates: true,
+                  });
+
+                if (backfillUpsertErr) {
+                  throw backfillUpsertErr;
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -451,7 +528,7 @@ export default function DashboardPage() {
       if (!typedSubjects.length) {
         setSubjectStats([]);
         setAlerts([]);
-        return;
+        return [];
       }
 
       const subjectIds = typedSubjects.map((subject) => subject.id);
@@ -487,7 +564,7 @@ export default function DashboardPage() {
           }))
         );
         setAlerts([]);
-        return;
+        return [];
       }
 
       const { data: statAttendance, error: statAttendanceError } = await supabase
@@ -646,6 +723,7 @@ export default function DashboardPage() {
       }
 
       setAlerts(nextAlerts);
+      return typedStatSlots;
     }
 
     async function loadDashboard() {
@@ -655,7 +733,7 @@ export default function DashboardPage() {
       try {
         const { data: semester, error: semesterError } = await supabase
           .from("semesters")
-          .select("id, name, end_date")
+          .select("id, name, start_date, end_date")
           .eq("user_id", PHASE_ONE_USER_ID)
           .lte("start_date", todayIso)
           .gte("end_date", todayIso)
@@ -677,7 +755,7 @@ export default function DashboardPage() {
         }
 
         setActiveSemester(semester);
-        await loadStats(semester);
+        const statSlots = await loadStats(semester);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -724,7 +802,8 @@ export default function DashboardPage() {
 
         setOverrides(overrideMap);
 
-        await autoMarkPastSlots(typedSlots, overrideMap);
+        await autoMarkPastSlots(typedSlots, overrideMap, semester, statSlots ?? []);
+        await loadStats(semester);
 
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
