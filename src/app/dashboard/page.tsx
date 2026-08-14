@@ -330,6 +330,7 @@ export default function DashboardPage() {
   );
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [pendingCalendarSlotIds, setPendingCalendarSlotIds] = useState<string[]>([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const today = new Date();
@@ -1020,6 +1021,32 @@ export default function DashboardPage() {
       );
     } finally {
       setPendingSlotIds((current) => current.filter((id) => id !== slotId));
+    }
+  }
+
+  async function handleCalendarToggle(slotId: string, date: string, currentStatus: AttendanceStatus | null) {
+    if (currentStatus === "cancelled") return;
+    const nextStatus: AttendanceStatus = currentStatus === "present" ? "absent" : "present";
+    setPendingCalendarSlotIds((prev) => [...prev, slotId]);
+    try {
+      const { error: upsertError } = await supabase
+        .from("attendance_records")
+        .upsert(
+          { slot_id: slotId, date, status: nextStatus, marked_by: "manual" },
+          { onConflict: "slot_id,date" }
+        );
+      if (upsertError) throw upsertError;
+      setCalendarAttendance((prev) =>
+        prev.some((r) => r.slot_id === slotId && r.date === date)
+          ? prev.map((r) =>
+              r.slot_id === slotId && r.date === date ? { ...r, status: nextStatus } : r
+            )
+          : [...prev, { slot_id: slotId, date, status: nextStatus, subject_id: "" } as CalendarAttendanceRow]
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update attendance");
+    } finally {
+      setPendingCalendarSlotIds((prev) => prev.filter((id) => id !== slotId));
     }
   }
 
@@ -1757,19 +1784,31 @@ export default function DashboardPage() {
                                 {item.timeRange}
                               </p>
                             </div>
-                            <Badge
-                              className={
-                                item.status === "present"
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : item.status === "absent"
-                                    ? "bg-red-100 text-red-700"
-                                    : item.status === "cancelled"
-                                      ? "bg-zinc-200 text-zinc-700"
-                                      : "bg-zinc-100 text-zinc-600"
-                              }
-                            >
-                              {getAttendanceStatusLabel(item.status)}
-                            </Badge>
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                className={
+                                  item.status === "present"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : item.status === "absent"
+                                      ? "bg-red-100 text-red-700"
+                                      : item.status === "cancelled"
+                                        ? "bg-zinc-200 text-zinc-700"
+                                        : "bg-zinc-100 text-zinc-600"
+                                }
+                              >
+                                {getAttendanceStatusLabel(item.status)}
+                              </Badge>
+                              {item.status !== "cancelled" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={pendingCalendarSlotIds.includes(item.id)}
+                                  onClick={() => void handleCalendarToggle(item.id, selectedCalendarDate!, item.status)}
+                                >
+                                  {item.status === "present" ? "Mark Absent" : "Mark Present"}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
