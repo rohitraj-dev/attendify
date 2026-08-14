@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Moon,
   MoreVertical,
+  Settings,
   Sun,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -721,7 +722,7 @@ export default function DashboardPage() {
         if (
           subject.percentage !== null &&
           subject.percentage >= subject.minAttendancePercent &&
-          subject.canMiss <= 2 &&
+          subject.canMiss <= 1 &&
           subject.canMiss >= 0
         ) {
           nextAlerts.push({
@@ -1311,6 +1312,18 @@ export default function DashboardPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            <a href="/setup">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0"
+                title="Go to Setup"
+              >
+                <Settings />
+                <span className="sr-only">Setup</span>
+              </Button>
+            </a>
             <Button
               type="button"
               variant="ghost"
