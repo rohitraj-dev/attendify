@@ -338,6 +338,7 @@ export default function DashboardPage() {
   const [holidays, setHolidays] = useState<Array<{ date: string; reason: string }>>([]);
   const [selectedAcademicDate, setSelectedAcademicDate] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [backfillDone, setBackfillDone] = useState(false);
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
@@ -510,6 +511,8 @@ export default function DashboardPage() {
           }
         }
       }
+
+      setBackfillDone(true);
     }
 
     async function loadStats(activeSemester: ActiveSemester) {
@@ -646,7 +649,7 @@ export default function DashboardPage() {
           semesterEndDate.setHours(0, 0, 0, 0);
 
           while (futureDate <= semesterEndDate) {
-            const isoDate = futureDate.toISOString().split("T")[0];
+            const isoDate = formatLocalDateIso(futureDate);
             const dayOfWeek = futureDate.getDay();
 
             for (const slot of subjectSlots) {
@@ -980,7 +983,7 @@ export default function DashboardPage() {
     }
 
     void loadCalendarData();
-  }, [activeSemester, displayedMonth, supabase]);
+  }, [activeSemester, displayedMonth, supabase, backfillDone]);
 
   useEffect(() => {
     if (!activeSemester?.id) return;
