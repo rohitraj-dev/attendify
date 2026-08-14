@@ -331,6 +331,12 @@ export default function DashboardPage() {
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [pendingCalendarSlotIds, setPendingCalendarSlotIds] = useState<string[]>([]);
+  const [academicMonth, setAcademicMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [holidays, setHolidays] = useState<Array<{ date: string; reason: string }>>([]);
+  const [selectedAcademicDate, setSelectedAcademicDate] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const today = new Date();
@@ -976,6 +982,18 @@ export default function DashboardPage() {
     void loadCalendarData();
   }, [activeSemester, displayedMonth, supabase]);
 
+  useEffect(() => {
+    if (!activeSemester?.id) return;
+    void (async () => {
+      const { data } = await supabase
+        .from("holidays")
+        .select("date, reason")
+        .eq("semester_id", activeSemester.id)
+        .order("date", { ascending: true });
+      setHolidays((data ?? []) as Array<{ date: string; reason: string }>);
+    })();
+  }, [activeSemester, supabase]);
+
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
@@ -1233,6 +1251,13 @@ export default function DashboardPage() {
     (alert) => !readAlerts.has(getAlertKey(alert))
   ).length;
   const calendarDays = buildCalendarDays(displayedMonth);
+  const academicDays = buildCalendarDays(academicMonth);
+  const holidaySet = new Map<string, string>(holidays.map((h) => [h.date, h.reason]));
+  const selectedAcademicHoliday = selectedAcademicDate ? holidaySet.get(selectedAcademicDate) : null;
+  const isSemesterDay = (dateIso: string) => {
+    if (!activeSemester) return false;
+    return dateIso >= activeSemester.start_date && (!activeSemester.end_date || dateIso <= activeSemester.end_date);
+  };
   const attendanceByDate = new Map<string, CalendarAttendanceRow[]>();
   const attendanceBySlotDate = new Map<string, AttendanceStatus>();
 
@@ -1397,6 +1422,7 @@ export default function DashboardPage() {
             <TabsTrigger value="today">Today</TabsTrigger>
             <TabsTrigger value="stats">Stats</TabsTrigger>
             <TabsTrigger value="calendar">Calendar</TabsTrigger>
+            <TabsTrigger value="academic">Academic</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="space-y-4">
@@ -1819,6 +1845,96 @@ export default function DashboardPage() {
                     <p className="text-sm text-muted-foreground">
                       Select a day to view its classes and attendance status.
                     </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="academic" className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle>{formatMonthLabel(academicMonth)}</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setAcademicMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+                      setSelectedAcademicDate(null);
+                    }}
+                  >
+                    ‹
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setAcademicMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+                      setSelectedAcademicDate(null);
+                    }}
+                  >
+                    ›
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-2 grid grid-cols-7 text-center text-xs font-medium text-muted-foreground">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                    <div key={d} className="py-1">{d}</div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-y-1">
+                  {academicDays.map((day) => {
+                    const dateKey = formatLocalDateIso(day);
+                    const isCurrentMonth = day.getMonth() === academicMonth.getMonth();
+                    const isToday = dateKey === localTodayIso;
+                    const isHoliday = holidaySet.has(dateKey);
+                    const inSemester = isSemesterDay(dateKey);
+                    const isStart = activeSemester && dateKey === activeSemester.start_date;
+                    const isSelected = selectedAcademicDate === dateKey;
+                    return (
+                      <button
+                        key={dateKey}
+                        onClick={() => setSelectedAcademicDate(dateKey === selectedAcademicDate ? null : dateKey)}
+                        className={[
+                          "flex flex-col items-center rounded-lg py-1 text-sm transition-colors",
+                          !isCurrentMonth ? "opacity-30" : "",
+                          isSelected ? "bg-zinc-200 dark:bg-zinc-700" : "hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                          isToday ? "font-bold text-blue-600 dark:text-blue-400" : "",
+                          !inSemester && isCurrentMonth ? "opacity-40" : "",
+                        ].join(" ")}
+                      >
+                        <span>{day.getDate()}</span>
+                        <span className="flex gap-0.5 mt-0.5">
+                          {isHoliday && <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />}
+                          {isStart && <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-500" />Holiday</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />Semester Start</span>
+                  <span className="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400">Today</span>
+                </div>
+
+                {selectedAcademicDate && (
+                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900">
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      {formatDisplayDate(new Date(`${selectedAcademicDate}T00:00:00`))}
+                    </p>
+                    {selectedAcademicHoliday ? (
+                      <p className="mt-1 text-sm text-red-600 dark:text-red-400">🎉 Holiday: {selectedAcademicHoliday}</p>
+                    ) : activeSemester && selectedAcademicDate === activeSemester.start_date ? (
+                      <p className="mt-1 text-sm text-emerald-600 dark:text-emerald-400">📅 Semester Start</p>
+                    ) : !isSemesterDay(selectedAcademicDate) ? (
+                      <p className="mt-1 text-sm text-muted-foreground">Outside semester range</p>
+                    ) : (
+                      <p className="mt-1 text-sm text-muted-foreground">No special events</p>
+                    )}
                   </div>
                 )}
               </CardContent>
