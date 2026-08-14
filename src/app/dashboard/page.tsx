@@ -1642,12 +1642,12 @@ export default function DashboardPage() {
                                 ? "On the edge — attend next class"
                                 : `Attend ${Math.abs(subject.canMiss)} classes to recover`}
                           </p>
-                          {subject.bestCasePercent !== null &&
-                          subject.worstCasePercent !== null ? (
+                          {subject.remainingClasses > 0 ? (
                             <p className="text-xs text-muted-foreground">
-                              By semester end: {subject.worstCasePercent}% (worst)
-                              {" \u2192 "}
-                              {subject.bestCasePercent}% (best)
+                              {subject.remainingClasses} classes remaining this semester
+                              {subject.bestCasePercent !== null && subject.bestCasePercent < 100
+                                ? ` · Max possible: ${subject.bestCasePercent}%`
+                                : ""}
                             </p>
                           ) : null}
                         </>
@@ -1753,10 +1753,10 @@ export default function DashboardPage() {
                         <span
                           className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${
                             isToday
-                              ? "bg-zinc-900 text-white"
+                              ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
                               : isCurrentMonth
-                                ? "text-zinc-900"
-                                : "text-zinc-400"
+                                ? "text-zinc-900 dark:text-zinc-100"
+                                : "text-zinc-400 dark:text-zinc-600"
                           }`}
                         >
                           {day.getDate()}
