@@ -35,6 +35,18 @@ export default function RootLayout({
           src="https://cloud.umami.is/script.js"
           data-website-id="fb643e94-caac-4f41-80e3-47bb5b80909e"
         />
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-KYLWEJG2PV"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-KYLWEJG2PV');
+          `}
+        </Script>
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
