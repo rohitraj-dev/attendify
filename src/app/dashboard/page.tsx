@@ -1693,6 +1693,14 @@ export default function DashboardPage() {
                         </p>
                       ) : (
                         <>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">
+                              {subject.attended} / {subject.totalHeld} classes attended so far
+                            </span>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                              {subject.percentage}%
+                            </span>
+                          </div>
                           <Progress
                             value={subject.percentage ?? 0}
                             className={getProgressClass(
@@ -1700,38 +1708,38 @@ export default function DashboardPage() {
                               subject.minAttendancePercent
                             )}
                           />
-                          <p className="text-sm text-muted-foreground">
-                            {subject.percentage}% attendance ({subject.attended}/
-                            {subject.totalHeld} classes)
-                          </p>
                           <p
                             className={`text-sm font-medium ${
                               subject.percentage !== null &&
                               subject.percentage >= subject.minAttendancePercent &&
                               subject.canMiss > 0
-                                ? "text-emerald-600"
+                                ? "text-emerald-600 dark:text-emerald-400"
                                 : subject.percentage !== null &&
                                     subject.percentage >=
                                       subject.minAttendancePercent &&
                                     subject.canMiss === 0
-                                  ? "text-amber-600"
-                                  : "text-red-600"
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-red-600 dark:text-red-400"
                             }`}
                           >
                             {subject.percentage !== null &&
                             subject.percentage >= subject.minAttendancePercent &&
                             subject.canMiss > 0
-                              ? `Can miss ${subject.canMiss} more classes`
+                              ? `Can miss ${subject.canMiss} more ${
+                                  subject.canMiss === 1 ? "class" : "classes"
+                                }`
                               : subject.percentage !== null &&
                                   subject.percentage >=
                                     subject.minAttendancePercent &&
                                   subject.canMiss === 0
                                 ? "On the edge — attend next class"
-                                : `Attend ${Math.abs(subject.canMiss)} classes to recover`}
+                                : `Attend ${Math.abs(subject.canMiss)} ${
+                                    Math.abs(subject.canMiss) === 1 ? "class" : "classes"
+                                  } to recover`}
                           </p>
                           {subject.remainingClasses > 0 ? (
                             <p className="text-xs text-muted-foreground">
-                              {subject.remainingClasses} classes remaining this semester
+                              {subject.remainingClasses} total classes remaining this semester
                               {subject.bestCasePercent !== null && subject.bestCasePercent < 100
                                 ? ` · Max possible: ${subject.bestCasePercent}%`
                                 : ""}
