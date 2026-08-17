@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   ChevronLeft,
@@ -302,6 +303,7 @@ function getAttendanceStatusLabel(status: AttendanceStatus | null) {
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [supabase] = useState(() => createBrowserSupabaseClient());
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
@@ -1672,10 +1674,17 @@ export default function DashboardPage() {
             {subjectStats.length ? (
               <div className="grid gap-4">
                 {subjectStats.map((subject) => (
-                  <Card key={subject.id}>
-                    <CardHeader>
-                      <CardTitle>{subject.name}</CardTitle>
-                      <CardDescription>{subject.code}</CardDescription>
+                  <Card
+                    key={subject.id}
+                    className="group cursor-pointer transition hover:border-zinc-300 dark:hover:border-zinc-700"
+                    onClick={() => router.push(`/subject/${subject.id}`)}
+                  >
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <div>
+                        <CardTitle>{subject.name}</CardTitle>
+                        <CardDescription>{subject.code}</CardDescription>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {subject.totalHeld === 0 ? (
