@@ -1072,6 +1072,71 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleCalendarCancelClass(slotId: string, date: string) {
+    setPendingCalendarSlotIds((prev) => [...prev, slotId]);
+    try {
+      const { error: overrideError } = await supabase
+        .from("day_overrides")
+        .upsert(
+          { slot_id: slotId, date, type: "cancelled", new_time: null },
+          { onConflict: "slot_id,date" }
+        );
+      if (overrideError) throw overrideError;
+
+      const { error: upsertError } = await supabase
+        .from("attendance_records")
+        .upsert(
+          { slot_id: slotId, date, status: "cancelled", marked_by: "manual" },
+          { onConflict: "slot_id,date" }
+        );
+      if (upsertError) throw upsertError;
+
+      setCalendarAttendance((prev) =>
+        prev.some((r) => r.slot_id === slotId && r.date === date)
+          ? prev.map((r) =>
+              r.slot_id === slotId && r.date === date ? { ...r, status: "cancelled" } : r
+            )
+          : [...prev, { slot_id: slotId, date, status: "cancelled", subject_id: "" } as CalendarAttendanceRow]
+      );
+      toast.success("Class marked as cancelled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel class");
+    } finally {
+      setPendingCalendarSlotIds((prev) => prev.filter((id) => id !== slotId));
+    }
+  }
+
+  async function handleCalendarUncancelClass(slotId: string, date: string) {
+    setPendingCalendarSlotIds((prev) => [...prev, slotId]);
+    try {
+      const { error: deleteError } = await supabase
+        .from("day_overrides")
+        .delete()
+        .eq("slot_id", slotId)
+        .eq("date", date);
+      if (deleteError) throw deleteError;
+
+      const { error: upsertError } = await supabase
+        .from("attendance_records")
+        .upsert(
+          { slot_id: slotId, date, status: "absent", marked_by: "manual" },
+          { onConflict: "slot_id,date" }
+        );
+      if (upsertError) throw upsertError;
+
+      setCalendarAttendance((prev) =>
+        prev.map((r) =>
+          r.slot_id === slotId && r.date === date ? { ...r, status: "absent" } : r
+        )
+      );
+      toast.success("Cancellation removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to uncancel class");
+    } finally {
+      setPendingCalendarSlotIds((prev) => prev.filter((id) => id !== slotId));
+    }
+  }
+
   async function handleCancelClass(slotId: string) {
     const targetClass = classes.find((item) => item.id === slotId);
 
@@ -1826,7 +1891,7 @@ export default function DashboardPage() {
                                 {item.timeRange}
                               </p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <Badge
                                 className={
                                   item.status === "present"
@@ -1840,15 +1905,34 @@ export default function DashboardPage() {
                               >
                                 {getAttendanceStatusLabel(item.status)}
                               </Badge>
-                              {item.status !== "cancelled" && (
+                              {item.status === "cancelled" ? (
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   disabled={pendingCalendarSlotIds.includes(item.id)}
-                                  onClick={() => void handleCalendarToggle(item.id, selectedCalendarDate!, item.status)}
+                                  onClick={() => void handleCalendarUncancelClass(item.id, selectedCalendarDate!)}
                                 >
-                                  {item.status === "present" ? "Mark Absent" : "Mark Present"}
+                                  Uncancel
                                 </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={pendingCalendarSlotIds.includes(item.id)}
+                                    onClick={() => void handleCalendarToggle(item.id, selectedCalendarDate!, item.status)}
+                                  >
+                                    {item.status === "present" ? "Mark Absent" : "Mark Present"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={pendingCalendarSlotIds.includes(item.id)}
+                                    onClick={() => void handleCalendarCancelClass(item.id, selectedCalendarDate!)}
+                                  >
+                                    Cancel Class
+                                  </Button>
+                                </>
                               )}
                             </div>
                           </div>
