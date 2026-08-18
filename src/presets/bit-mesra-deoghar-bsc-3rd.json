@@ -1,0 +1,35 @@
+{
+  "key": "bit-mesra-deoghar-campus|bsc|3rd",
+  "label": "BIT Mesra Deoghar — BSc 3rd Sem",
+  "subjects": [
+    { "name": "Principles of Management", "code": "POM", "min_attendance_percent": 75 },
+    { "name": "Digital Design & Circuits", "code": "DDC", "min_attendance_percent": 75 },
+    { "name": "Data Analytics & Visualization", "code": "DAV", "min_attendance_percent": 75 },
+    { "name": "Formal Language & Design of Compiler", "code": "FLDC", "min_attendance_percent": 75 },
+    { "name": "Software Requirements", "code": "SWR", "min_attendance_percent": 75 },
+    { "name": "PSCW Lab", "code": "PSCW", "min_attendance_percent": 75 },
+    { "name": "Data Analytics Lab", "code": "DA LAB", "min_attendance_percent": 75 },
+    { "name": "SWR Lab", "code": "SWR LAB", "min_attendance_percent": 75 },
+    { "name": "Digital Design Lab", "code": "DD LAB", "min_attendance_percent": 75 }
+  ],
+  "slots": [
+    { "subject_code": "POM", "day_of_week": 1, "start_time": "09:00", "end_time": "09:50" },
+    { "subject_code": "DDC", "day_of_week": 1, "start_time": "10:00", "end_time": "10:50" },
+    { "subject_code": "DAV", "day_of_week": 1, "start_time": "12:00", "end_time": "12:50" },
+    { "subject_code": "PSCW", "day_of_week": 2, "start_time": "09:00", "end_time": "11:50" },
+    { "subject_code": "FLDC", "day_of_week": 2, "start_time": "12:00", "end_time": "12:50" },
+    { "subject_code": "SWR LAB", "day_of_week": 2, "start_time": "15:30", "end_time": "16:20" },
+    { "subject_code": "POM", "day_of_week": 3, "start_time": "09:00", "end_time": "09:50" },
+    { "subject_code": "FLDC", "day_of_week": 3, "start_time": "10:00", "end_time": "10:50" },
+    { "subject_code": "SWR", "day_of_week": 3, "start_time": "11:00", "end_time": "11:50" },
+    { "subject_code": "DAV", "day_of_week": 4, "start_time": "10:00", "end_time": "10:50" },
+    { "subject_code": "DDC", "day_of_week": 4, "start_time": "11:00", "end_time": "11:50" },
+    { "subject_code": "FLDC", "day_of_week": 4, "start_time": "12:00", "end_time": "12:50" },
+    { "subject_code": "DA LAB", "day_of_week": 4, "start_time": "14:30", "end_time": "16:20" },
+    { "subject_code": "POM", "day_of_week": 5, "start_time": "09:00", "end_time": "09:50" },
+    { "subject_code": "SWR", "day_of_week": 5, "start_time": "10:00", "end_time": "10:50" },
+    { "subject_code": "DDC", "day_of_week": 5, "start_time": "11:00", "end_time": "11:50" },
+    { "subject_code": "DAV", "day_of_week": 5, "start_time": "12:00", "end_time": "12:50" },
+    { "subject_code": "DD LAB", "day_of_week": 5, "start_time": "15:30", "end_time": "16:20" }
+  ]
+}

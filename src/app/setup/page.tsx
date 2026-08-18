@@ -19,6 +19,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 
@@ -77,6 +84,7 @@ export default function SetupPage() {
   const [semesterEndDate, setSemesterEndDate] = useState("");
   const [savedSemester, setSavedSemester] = useState<SemesterInsert | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
+  const [presetBranch, setPresetBranch] = useState<string>("BCA");
   const [semesterNumber, setSemesterNumber] = useState<(typeof semesterNumbers)[number] | null>(null);
 
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
@@ -97,6 +105,14 @@ export default function SetupPage() {
 
     return () => window.cancelAnimationFrame(frameId);
   }, []);
+
+  useEffect(() => {
+    if (selectedBranch === "BCA") {
+      setPresetBranch("BCA");
+    } else if (selectedBranch?.startsWith("BSc")) {
+      setPresetBranch("BSc");
+    }
+  }, [selectedBranch]);
 
   function handleThemeToggle() {
     setIsDarkMode((current) => {
@@ -171,16 +187,14 @@ export default function SetupPage() {
   }
 
   async function handleLoadPreset() {
-    if (!selectedBranch || !semesterNumber) {
-      toast.error("Select branch and semester first");
-      return;
-    }
+    const branchToUse = presetBranch || selectedBranch || "BCA";
+    const semToUse = semesterNumber || "3rd";
     setIsParsingTimetable(true);
     try {
       const params = new URLSearchParams({
         college: "BIT Mesra, Deoghar Campus",
-        branch: selectedBranch,
-        semesterNumber: semesterNumber,
+        branch: branchToUse,
+        semesterNumber: semToUse,
       });
       const response = await fetch(`/api/preset-timetable?${params.toString()}`);
       const payload = await response.json() as { success: boolean; slots?: Array<{ subject_code: string; teacher: string; room: string; day: number; start_time: string; end_time: string }>; error?: string };
@@ -617,7 +631,7 @@ export default function SetupPage() {
               <Button variant="outline" onClick={() => setCurrentStep(2)}>
                 Back
               </Button>
-              <div className="flex flex-wrap justify-end gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-3">
                 <Button
                   type="button"
                   variant="outline"
@@ -625,6 +639,23 @@ export default function SetupPage() {
                 >
                   Skip
                 </Button>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="preset-branch-select" className="text-sm font-medium">
+                    Branch
+                  </Label>
+                  <Select
+                    value={presetBranch}
+                    onValueChange={(val) => setPresetBranch(val)}
+                  >
+                    <SelectTrigger id="preset-branch-select" className="w-[100px]">
+                      <SelectValue placeholder="Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="BCA">BCA</SelectItem>
+                      <SelectItem value="BSc">BSc</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   type="button"
                   variant="outline"

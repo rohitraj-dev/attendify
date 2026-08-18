@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 const PRESET_MAP: Record<string, string> = {
   "bit-mesra-deoghar-campus|bca|3rd": "bit-mesra-deoghar-bca-3rd",
+  "bit-mesra-deoghar-campus|bsc|3rd": "bit-mesra-deoghar-bsc-3rd",
 };
 
 export async function GET(request: NextRequest) {
