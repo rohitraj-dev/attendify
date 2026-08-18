@@ -8,6 +8,7 @@ import {
   Ban,
   BookOpen,
   Calendar,
+  CalendarDays,
   CheckCircle2,
   Clock,
   Flame,
@@ -33,6 +34,14 @@ type SubjectRow = {
   name: string;
   code: string;
   min_attendance_percent: number;
+  semester_id: string;
+};
+
+type SemesterRow = {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
 };
 
 type ScheduleSlot = {
@@ -40,6 +49,13 @@ type ScheduleSlot = {
   day_of_week: number;
   start_time: string;
   end_time: string;
+};
+
+type DayOverrideRow = {
+  id: string;
+  slot_id: string;
+  date: string;
+  type: "cancelled" | "rescheduled";
 };
 
 type AttendanceRecord = {
@@ -136,7 +152,9 @@ export default function SubjectDetailPage() {
 
   const [supabase] = useState(() => createBrowserSupabaseClient());
   const [subject, setSubject] = useState<SubjectRow | null>(null);
+  const [semester, setSemester] = useState<SemesterRow | null>(null);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
+  const [dayOverrides, setDayOverrides] = useState<DayOverrideRow[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +177,7 @@ export default function SubjectDetailPage() {
         // 1. Fetch subject details
         const { data: subjectData, error: subjectError } = await supabase
           .from("subjects")
-          .select("id, name, code, min_attendance_percent")
+          .select("id, name, code, min_attendance_percent, semester_id")
           .eq("id", subjectId)
           .single();
 
@@ -170,7 +188,17 @@ export default function SubjectDetailPage() {
           return;
         }
 
-        setSubject(subjectData);
+        setSubject(subjectData as SubjectRow);
+
+        // 1b. Fetch semester details using subject's semester_id
+        const { data: semesterData, error: semesterError } = await supabase
+          .from("semesters")
+          .select("id, name, start_date, end_date")
+          .eq("id", subjectData.semester_id)
+          .single();
+
+        if (semesterError) throw semesterError;
+        setSemester(semesterData as SemesterRow);
 
         // 2. Fetch all schedule slots for this subject
         const { data: slotsData, error: slotsError } = await supabase
@@ -187,20 +215,31 @@ export default function SubjectDetailPage() {
 
         if (slotIds.length === 0) {
           setRecords([]);
+          setDayOverrides([]);
           setIsLoading(false);
           return;
         }
 
-        // 3. Fetch all attendance records for these slot IDs ordered by date desc
-        const { data: recordsData, error: recordsError } = await supabase
-          .from("attendance_records")
-          .select("slot_id, date, status")
-          .in("slot_id", slotIds)
-          .order("date", { ascending: false });
+        // 3. Fetch attendance records & cancelled day overrides
+        const [{ data: recordsData, error: recordsError }, { data: overridesData, error: overridesError }] =
+          await Promise.all([
+            supabase
+              .from("attendance_records")
+              .select("slot_id, date, status")
+              .in("slot_id", slotIds)
+              .order("date", { ascending: false }),
+            supabase
+              .from("day_overrides")
+              .select("id, slot_id, date, type")
+              .in("slot_id", slotIds)
+              .eq("type", "cancelled"),
+          ]);
 
         if (recordsError) throw recordsError;
+        if (overridesError) throw overridesError;
 
         setRecords((recordsData ?? []) as AttendanceRecord[]);
+        setDayOverrides((overridesData ?? []) as DayOverrideRow[]);
       } catch (err) {
         console.error("Failed to load subject detail:", err);
         setError(err instanceof Error ? err.message : "Failed to load subject details");
@@ -244,6 +283,53 @@ export default function SubjectDetailPage() {
       break;
     }
   }
+
+  // Semester Overview calculations
+  let totalClassesInSemester = 0;
+  let remainingClassesInSemester = 0;
+
+  if (semester && scheduleSlots.length > 0) {
+    const cancelledSet = new Set(
+      dayOverrides.map((o) => `${o.slot_id}:${o.date}`)
+    );
+
+    const [sY, sM, sD] = semester.start_date.split("-").map(Number);
+    const startDate = new Date(sY, sM - 1, sD);
+    const [eY, eM, eD] = semester.end_date.split("-").map(Number);
+    const endDate = new Date(eY, eM - 1, eD);
+
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dow = current.getDay();
+      if (dow !== 0 && dow !== 6) {
+        const year = current.getFullYear();
+        const month = String(current.getMonth() + 1).padStart(2, "0");
+        const day = String(current.getDate()).padStart(2, "0");
+        const isoDate = `${year}-${month}-${day}`;
+
+        for (const slot of scheduleSlots) {
+          if (slot.day_of_week === dow) {
+            if (!cancelledSet.has(`${slot.id}:${isoDate}`)) {
+              totalClassesInSemester += 1;
+              if (current >= todayDate) {
+                remainingClassesInSemester += 1;
+              }
+            }
+          }
+        }
+      }
+      current.setDate(current.getDate() + 1);
+    }
+  }
+
+  const maxAllowedAbsences = Math.floor(
+    (totalClassesInSemester * (100 - minPercent)) / 100
+  );
+  const absencesUsed = absentCount;
+  const absencesLeft = maxAllowedAbsences - absencesUsed;
 
   const sortedSlots = [...scheduleSlots].sort((a, b) => {
     const dayA = a.day_of_week === 0 ? 7 : a.day_of_week;
@@ -384,6 +470,75 @@ export default function SubjectDetailPage() {
                       Threshold line at {minPercent}%
                     </span>
                     <span>100%</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Semester Overview Card */}
+            <Card className="dark:border-zinc-800 dark:bg-zinc-900">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-zinc-500" />
+                  Semester Overview
+                </CardTitle>
+                {semester && (
+                  <CardDescription>
+                    {semester.name} ({formatDateRecord(semester.start_date)} - {formatDateRecord(semester.end_date)})
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Total Classes</p>
+                    <p className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                      {totalClassesInSemester}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Max Allowed Absences</p>
+                    <p className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                      {maxAllowedAbsences}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Classes Remaining</p>
+                    <p className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                      {remainingClassesInSemester}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
+                    <p className="text-xs text-red-600 dark:text-red-400">Absences Used</p>
+                    <p className="text-lg font-semibold tracking-tight text-red-700 dark:text-red-400">
+                      {absencesUsed}
+                    </p>
+                  </div>
+                  <div
+                    className={`rounded-lg border p-3 ${
+                      absencesLeft < 0
+                        ? "border-red-300 bg-red-100/50 dark:border-red-800 dark:bg-red-950/50"
+                        : "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/30"
+                    }`}
+                  >
+                    <p
+                      className={`text-xs ${
+                        absencesLeft < 0
+                          ? "text-red-700 dark:text-red-300 font-medium"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}
+                    >
+                      Absences Left
+                    </p>
+                    <p
+                      className={`text-lg font-semibold tracking-tight ${
+                        absencesLeft < 0
+                          ? "text-red-800 dark:text-red-200"
+                          : "text-emerald-700 dark:text-emerald-300"
+                      }`}
+                    >
+                      {absencesLeft}
+                    </p>
                   </div>
                 </div>
               </CardContent>
