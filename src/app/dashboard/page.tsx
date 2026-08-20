@@ -709,6 +709,10 @@ export default function DashboardPage() {
       const nextAlerts: AlertItem[] = [];
 
       for (const subject of computedStats) {
+        if (subject.totalHeld < 4) {
+          continue;
+        }
+
         if (
           subject.percentage !== null &&
           subject.percentage < subject.minAttendancePercent
