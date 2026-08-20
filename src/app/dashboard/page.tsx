@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileText,
   Moon,
   MoreVertical,
   Settings,
@@ -1067,6 +1068,118 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
+  const exportPDF = () => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const semesterName = activeSemester?.name || "Semester";
+    const dateStr = localTodayIso;
+
+    const tableRows = subjectStats.map((subject) => {
+      const absent = subject.totalHeld - subject.attended;
+      const attendancePct = subject.percentage !== null ? `${subject.percentage}%` : "N/A";
+      const minRequiredPct = `${subject.minAttendancePercent}%`;
+      return `
+        <tr>
+          <td>${subject.name}</td>
+          <td>${subject.code}</td>
+          <td>${subject.totalHeld}</td>
+          <td>${subject.attended}</td>
+          <td>${absent}</td>
+          <td>${attendancePct}</td>
+          <td>${subject.canMiss}</td>
+          <td>${minRequiredPct}</td>
+        </tr>
+      `;
+    }).join("");
+
+    printWindow.document.open();
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Attendance Report - ${semesterName}</title>
+        </head>
+        <body>
+          <div id="attendance-print-container">
+            <h1 style="font-size: 20px; margin-bottom: 4px;">Attendance Report</h1>
+            <h2 style="font-size: 14px; color: #4b5563; margin-top: 0; margin-bottom: 20px;">
+              Semester: ${semesterName} (${dateStr})
+            </h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  <th>Code</th>
+                  <th>Classes Held</th>
+                  <th>Attended</th>
+                  <th>Absent</th>
+                  <th>Attendance %</th>
+                  <th>Safe to Miss</th>
+                  <th>Min Required %</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+              </tbody>
+            </table>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+
+    const styleEl = printWindow.document.createElement("style");
+    styleEl.innerHTML = `
+      @media print {
+        body * {
+          visibility: hidden;
+        }
+        #attendance-print-container, #attendance-print-container * {
+          visibility: visible;
+        }
+        #attendance-print-container {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+        }
+      }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 20px;
+        color: #111;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      th, td {
+        border: 1px solid #e5e7eb;
+        padding: 8px 12px;
+        text-align: left;
+        font-size: 12px;
+      }
+      th {
+        background-color: #f9fafb;
+        font-weight: 600;
+      }
+    `;
+    printWindow.document.head.appendChild(styleEl);
+
+    let hasPrinted = false;
+    const doPrint = () => {
+      if (hasPrinted) return;
+      hasPrinted = true;
+      printWindow.print();
+      printWindow.close();
+    };
+
+    printWindow.onload = doPrint;
+    setTimeout(doPrint, 250);
+  };
+
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
@@ -1740,7 +1853,7 @@ export default function DashboardPage() {
           <TabsContent value="stats" className="space-y-4">
             {subjectStats.length ? (
               <>
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1749,6 +1862,15 @@ export default function DashboardPage() {
                   >
                     <Download className="h-4 w-4" />
                     Export CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportPDF}
+                    className="flex items-center gap-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Export PDF
                   </Button>
                 </div>
                 <div className="grid gap-4">
