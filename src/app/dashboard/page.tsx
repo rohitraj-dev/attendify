@@ -6,6 +6,7 @@ import {
   Bell,
   ChevronLeft,
   ChevronRight,
+  Download,
   Moon,
   MoreVertical,
   Settings,
@@ -1004,6 +1005,68 @@ export default function DashboardPage() {
     })();
   }, [activeSemester, supabase]);
 
+  const exportCSV = () => {
+    const headers = [
+      "Subject",
+      "Code",
+      "Classes Held",
+      "Attended",
+      "Absent",
+      "Attendance %",
+      "Safe to Miss",
+      "Min Required %"
+    ];
+
+    const escapeCSVValue = (val: string | number | null | undefined) => {
+      if (val === null || val === undefined) return "";
+      const str = String(val);
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const rows = subjectStats.map((subject) => {
+      const absent = subject.totalHeld - subject.attended;
+      const attendancePct = subject.percentage !== null ? `${subject.percentage}%` : "N/A";
+      const minRequiredPct = `${subject.minAttendancePercent}%`;
+      return [
+        subject.name,
+        subject.code,
+        subject.totalHeld,
+        subject.attended,
+        absent,
+        attendancePct,
+        subject.canMiss,
+        minRequiredPct
+      ];
+    });
+
+    const csvContent = [
+      headers.map(escapeCSVValue).join(","),
+      ...rows.map((row) => row.map(escapeCSVValue).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    const semesterName = activeSemester?.name
+      ? activeSemester.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+      : "";
+    const filename = semesterName
+      ? `attendance-${semesterName}-${localTodayIso}.csv`
+      : `attendance-${localTodayIso}.csv`;
+
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
@@ -1676,7 +1739,19 @@ export default function DashboardPage() {
 
           <TabsContent value="stats" className="space-y-4">
             {subjectStats.length ? (
-              <div className="grid gap-4">
+              <>
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportCSV}
+                    className="flex items-center gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export CSV
+                  </Button>
+                </div>
+                <div className="grid gap-4">
                 {subjectStats.map((subject) => (
                   <Card
                     key={subject.id}
@@ -1755,6 +1830,7 @@ export default function DashboardPage() {
                   </Card>
                 ))}
               </div>
+              </>
             ) : (
               <Card>
                 <CardContent className="pt-6">
