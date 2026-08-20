@@ -197,7 +197,7 @@ export default function SetupPage() {
         semesterNumber: semToUse,
       });
       const response = await fetch(`/api/preset-timetable?${params.toString()}`);
-      const payload = await response.json() as { success: boolean; slots?: Array<{ subject_code: string; teacher: string; room: string; day: number; start_time: string; end_time: string }>; error?: string };
+      const payload = await response.json() as { success: boolean; slots?: Array<{ subject_code: string; teacher: string; room: string; day: number; day_of_week?: number; start_time: string; end_time: string }>; error?: string };
       if (!response.ok || !payload.success) {
         throw new Error(payload.error ?? "No preset found for this combination");
       }
@@ -207,7 +207,7 @@ export default function SetupPage() {
           subject_code: slot.subject_code,
           teacher: slot.teacher,
           room: slot.room,
-          day: slot.day,
+          day: slot.day ?? (slot as any).day_of_week,
           start_time: slot.start_time,
           end_time: slot.end_time,
           checked: true,
@@ -265,7 +265,7 @@ export default function SetupPage() {
           subject_code: slot.subject_code,
           teacher: slot.teacher,
           room: slot.room,
-          day: slot.day,
+          day: slot.day ?? (slot as any).day_of_week,
           start_time: slot.start_time,
           end_time: slot.end_time,
           checked: true,
