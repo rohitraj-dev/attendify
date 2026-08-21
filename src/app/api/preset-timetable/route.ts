@@ -43,5 +43,5 @@ export async function GET(request: NextRequest) {
   }
 
   const preset = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  return Response.json({ success: true, slots: preset.slots });
+  return Response.json({ success: true, slots: preset.slots, holidays: preset.holidays ?? [] });
 }

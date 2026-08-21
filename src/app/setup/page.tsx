@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Moon, Sun } from "lucide-react";
+import { CalendarDays, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -78,6 +78,8 @@ export default function SetupPage() {
   const [isSavingSemester, setIsSavingSemester] = useState(false);
   const [isParsingTimetable, setIsParsingTimetable] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [isLoadingPresetHolidays, setIsLoadingPresetHolidays] = useState(false);
+  const [holidayRefreshKey, setHolidayRefreshKey] = useState(0);
 
   const [semesterName, setSemesterName] = useState("");
   const [semesterStartDate, setSemesterStartDate] = useState("");
@@ -218,6 +220,68 @@ export default function SetupPage() {
       toast.error(error instanceof Error ? error.message : "Failed to load preset");
     } finally {
       setIsParsingTimetable(false);
+    }
+  }
+
+  async function loadPresetHolidays() {
+    if (!savedSemester?.id) {
+      toast.error("No saved semester found");
+      return;
+    }
+
+    const branchToUse = presetBranch || selectedBranch || "BCA";
+    const semToUse = semesterNumber || "3rd";
+    setIsLoadingPresetHolidays(true);
+
+    try {
+      const params = new URLSearchParams({
+        college: "BIT Mesra, Deoghar Campus",
+        branch: branchToUse,
+        semesterNumber: semToUse,
+      });
+
+      const response = await fetch(`/api/preset-timetable?${params.toString()}`);
+      const payload = (await response.json()) as {
+        success: boolean;
+        holidays?: Array<{ date: string; reason: string }>;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error ?? "Failed to fetch preset holidays");
+      }
+
+      const presetHolidays = payload.holidays ?? [];
+      if (!presetHolidays.length) {
+        toast.error("No preset holidays found");
+        return;
+      }
+
+      let loadedCount = 0;
+      for (const holiday of presetHolidays) {
+        const { error } = await supabase.from("holidays").upsert(
+          {
+            semester_id: savedSemester.id,
+            date: holiday.date,
+            reason: holiday.reason,
+          },
+          { onConflict: "semester_id,date" }
+        );
+
+        if (error) {
+          throw error;
+        }
+        loadedCount += 1;
+      }
+
+      toast.success(`${loadedCount} holidays loaded`);
+      setHolidayRefreshKey((prev) => prev + 1);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load preset holidays";
+      toast.error(message);
+    } finally {
+      setIsLoadingPresetHolidays(false);
     }
   }
 
@@ -686,7 +750,22 @@ export default function SetupPage() {
 
         {currentStep === 4 && (
           <div className="space-y-4">
-            <HolidayManager semesterId={savedSemester?.id ?? ""} />
+            {savedSemester && (selectedBranch || presetBranch) && semesterNumber ? (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingPresetHolidays}
+                  onClick={() => void loadPresetHolidays()}
+                  className="flex items-center gap-2"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  {isLoadingPresetHolidays ? "Loading..." : "Load Preset Holidays"}
+                </Button>
+              </div>
+            ) : null}
+            <HolidayManager key={holidayRefreshKey} semesterId={savedSemester?.id ?? ""} />
             <div className="flex justify-between gap-3">
               <Button variant="outline" onClick={() => setCurrentStep(3)}>
                 Back
