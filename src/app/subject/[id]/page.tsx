@@ -151,6 +151,7 @@ export default function SubjectDetailPage() {
         : "";
 
   const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [userId, setUserId] = useState<string | null>(null);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
   const [semester, setSemester] = useState<SemesterRow | null>(null);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
@@ -160,6 +161,24 @@ export default function SubjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    async function getAuthUser() {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        router.push("/auth");
+        return;
+      }
+
+      setUserId(user.id);
+    }
+
+    void getAuthUser();
+  }, [supabase, router]);
+
+  useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (savedTheme === "dark") {
       document.documentElement.classList.add("dark");
@@ -167,7 +186,7 @@ export default function SubjectDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (!subjectId) return;
+    if (!userId || !subjectId) return;
 
     async function fetchSubjectDetail() {
       setIsLoading(true);
@@ -249,7 +268,7 @@ export default function SubjectDetailPage() {
     }
 
     void fetchSubjectDetail();
-  }, [subjectId, supabase]);
+  }, [userId, subjectId, supabase]);
 
   // Statistics calculation
   const presentCount = records.filter((r) => r.status === "present").length;

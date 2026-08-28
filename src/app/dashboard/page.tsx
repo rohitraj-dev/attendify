@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  LogOut,
   Moon,
   MoreVertical,
   Settings,
@@ -53,7 +54,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus } from "@/lib/types";
 
-const PHASE_ONE_USER_ID = "00000000-0000-0000-0000-000000000001";
 const THEME_STORAGE_KEY = "attendify-theme";
 
 type ActiveSemester = {
@@ -307,6 +307,7 @@ const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export default function DashboardPage() {
   const router = useRouter();
   const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [userId, setUserId] = useState<string | null>(null);
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
@@ -350,6 +351,24 @@ export default function DashboardPage() {
   const todayIso = today.toISOString().split("T")[0];
   const localTodayIso = formatLocalDateIso(today);
   const headerDate = formatDisplayDate(today);
+
+  useEffect(() => {
+    async function getAuthUser() {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        router.push("/auth");
+        return;
+      }
+
+      setUserId(user.id);
+    }
+
+    void getAuthUser();
+  }, [supabase, router]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -746,6 +765,10 @@ export default function DashboardPage() {
     }
 
     async function loadDashboard() {
+      if (!userId) {
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
@@ -755,7 +778,7 @@ export default function DashboardPage() {
         let semesterQuery = supabase
           .from("semesters")
           .select("id, name, start_date, end_date")
-          .eq("user_id", PHASE_ONE_USER_ID);
+          .eq("user_id", userId);
 
         if (storedSemesterId) {
           semesterQuery = semesterQuery.eq("id", storedSemesterId);
@@ -894,11 +917,11 @@ export default function DashboardPage() {
     }
 
     void loadDashboard();
-  }, [supabase, todayDayOfWeek, todayIso]);
+  }, [supabase, todayDayOfWeek, todayIso, userId]);
 
   useEffect(() => {
     async function loadCalendarData() {
-      if (!activeSemester) {
+      if (!userId || !activeSemester) {
         setCalendarClasses([]);
         setCalendarAttendance([]);
         setCalendarError(null);
@@ -992,10 +1015,10 @@ export default function DashboardPage() {
     }
 
     void loadCalendarData();
-  }, [activeSemester, displayedMonth, supabase, backfillDone]);
+  }, [activeSemester, displayedMonth, supabase, backfillDone, userId]);
 
   useEffect(() => {
-    if (!activeSemester?.id) return;
+    if (!userId || !activeSemester?.id) return;
     void (async () => {
       const { data } = await supabase
         .from("holidays")
@@ -1004,7 +1027,7 @@ export default function DashboardPage() {
         .order("date", { ascending: true });
       setHolidays((data ?? []) as Array<{ date: string; reason: string }>);
     })();
-  }, [activeSemester, supabase]);
+  }, [activeSemester, supabase, userId]);
 
   const exportCSV = () => {
     const headers = [
@@ -1580,6 +1603,20 @@ export default function DashboardPage() {
             >
               {isDarkMode ? <Sun /> : <Moon />}
               <span className="sr-only">Toggle theme</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push("/auth");
+              }}
+              title="Logout"
+            >
+              <LogOut />
+              <span className="sr-only">Logout</span>
             </Button>
             <Sheet>
               <SheetTrigger asChild>
