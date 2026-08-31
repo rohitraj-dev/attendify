@@ -6,6 +6,7 @@ import type { NextRequest } from "next/server";
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
+  let redirectTo = "/dashboard";
 
   if (code) {
     const cookieStore = await cookies();
@@ -26,7 +27,20 @@ export async function GET(request: NextRequest) {
       }
     );
     await supabase.auth.exchangeCodeForSession(code);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: semesters, error } = await supabase
+        .from("semesters")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+
+      if (!error && (!semesters || semesters.length === 0)) {
+        redirectTo = "/setup";
+      }
+    }
   }
 
-  return NextResponse.redirect(new URL("/dashboard", request.url));
+  return NextResponse.redirect(new URL(redirectTo, request.url));
 }
