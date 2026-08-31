@@ -139,13 +139,17 @@ export default function SetupPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
+      if (!user?.id) {
+        throw new Error("Not logged in");
+      }
+
       const { data, error } = await supabase
         .from("semesters")
         .insert({
           name: semesterName,
           start_date: semesterStartDate,
           end_date: semesterEndDate,
-          user_id: user?.id ?? "00000000-0000-0000-0000-000000000001",
+          user_id: user.id,
         })
         .select("id, name, start_date, end_date")
         .single();
