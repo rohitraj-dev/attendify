@@ -74,7 +74,7 @@ export default function AuthPage() {
     if (error) {
       setSignupError(error.message);
     } else {
-      router.push("/dashboard");
+      router.push("/setup");
     }
   };
 
