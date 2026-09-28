@@ -365,6 +365,7 @@ export default function DashboardPage() {
       }
 
       setUserId(user.id);
+      console.log("Logged in user ID:", user.id, "Email:", user.email);
     }
 
     void getAuthUser();
