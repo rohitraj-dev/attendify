@@ -150,6 +150,7 @@ export default function SetupPage() {
           start_date: semesterStartDate,
           end_date: semesterEndDate,
           user_id: user.id,
+          is_active: true,
         })
         .select("id, name, start_date, end_date")
         .single();
@@ -159,7 +160,6 @@ export default function SetupPage() {
       }
 
       setSavedSemester(data);
-      localStorage.setItem("activeSemesterId", data.id);
       setCurrentStep(2);
       toast.success("Semester created");
     } catch (error) {

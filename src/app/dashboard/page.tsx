@@ -774,25 +774,12 @@ export default function DashboardPage() {
       setError(null);
 
       try {
-        const storedSemesterId = localStorage.getItem("activeSemesterId");
-
-        let semesterQuery = supabase
+        const { data: semester, error: semesterError } = await supabase
           .from("semesters")
           .select("id, name, start_date, end_date")
-          .eq("user_id", userId);
-
-        if (storedSemesterId) {
-          semesterQuery = semesterQuery.eq("id", storedSemesterId);
-        } else {
-          semesterQuery = semesterQuery
-            .lte("start_date", todayIso)
-            .gte("end_date", todayIso)
-            .order("start_date", { ascending: false })
-            .limit(1);
-        }
-
-        const { data: semester, error: semesterError } =
-          await semesterQuery.maybeSingle();
+          .eq("user_id", userId)
+          .eq("is_active", true)
+          .maybeSingle();
 
         if (semesterError) {
           throw semesterError;
