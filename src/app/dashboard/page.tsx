@@ -388,7 +388,8 @@ export default function DashboardPage() {
       slots: SlotRow[],
       overrideMap: Record<string, DayOverride>,
       activeSemester: ActiveSemester,
-      statSlots: Array<{ id: string; subject_id: string; day_of_week: number }>
+      statSlots: Array<{ id: string; subject_id: string; day_of_week: number }>,
+      holidayDates: Set<string>
     ) {
       if (hasAutoMarked.current) {
         return;
@@ -396,64 +397,66 @@ export default function DashboardPage() {
 
       hasAutoMarked.current = true;
 
-      const now = new Date();
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const pastSlots = slots.filter((slot) => {
-        const override = overrideMap[slot.id];
+      if (!holidayDates.has(todayIso)) {
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const pastSlots = slots.filter((slot) => {
+          const override = overrideMap[slot.id];
 
-        if (override?.type === "cancelled") {
-          return false;
-        }
+          if (override?.type === "cancelled") {
+            return false;
+          }
 
-        const effectiveStart =
-          override?.type === "rescheduled" && override.new_time
-            ? override.new_time
-            : slot.start_time;
-        const duration = Math.max(
-          timeToMinutes(slot.end_time) - timeToMinutes(slot.start_time),
-          0
-        );
-        const effectiveEndMinutes = timeToMinutes(effectiveStart) + duration;
+          const effectiveStart =
+            override?.type === "rescheduled" && override.new_time
+              ? override.new_time
+              : slot.start_time;
+          const duration = Math.max(
+            timeToMinutes(slot.end_time) - timeToMinutes(slot.start_time),
+            0
+          );
+          const effectiveEndMinutes = timeToMinutes(effectiveStart) + duration;
 
-        return currentMinutes > effectiveEndMinutes;
-      });
+          return currentMinutes > effectiveEndMinutes;
+        });
 
-      if (pastSlots.length) {
-        const pastSlotIds = pastSlots.map((slot) => slot.id);
-        const { data: existingAttendance, error: existingAttendanceError } =
-          await supabase
-            .from("attendance_records")
-            .select("slot_id")
-            .eq("date", todayIso)
-            .in("slot_id", pastSlotIds);
+        if (pastSlots.length) {
+          const pastSlotIds = pastSlots.map((slot) => slot.id);
+          const { data: existingAttendance, error: existingAttendanceError } =
+            await supabase
+              .from("attendance_records")
+              .select("slot_id")
+              .eq("date", todayIso)
+              .in("slot_id", pastSlotIds);
 
-        if (existingAttendanceError) {
-          throw existingAttendanceError;
-        }
+          if (existingAttendanceError) {
+            throw existingAttendanceError;
+          }
 
-        const existingSlotIds = new Set(
-          (existingAttendance ?? []).map((record) => record.slot_id)
-        );
+          const existingSlotIds = new Set(
+            (existingAttendance ?? []).map((record) => record.slot_id)
+          );
 
-        const slotsToInsert = pastSlots
-          .filter((slot) => !existingSlotIds.has(slot.id))
-          .map((slot) => ({
-            slot_id: slot.id,
-            date: todayIso,
-            status: "present" as const,
-            marked_by: "auto" as const,
-          }));
+          const slotsToInsert = pastSlots
+            .filter((slot) => !existingSlotIds.has(slot.id))
+            .map((slot) => ({
+              slot_id: slot.id,
+              date: todayIso,
+              status: "present" as const,
+              marked_by: "auto" as const,
+            }));
 
-        if (slotsToInsert.length) {
-          const { error: upsertError } = await supabase
-            .from("attendance_records")
-            .upsert(slotsToInsert, {
-              onConflict: "slot_id,date",
-              ignoreDuplicates: true,
-            });
+          if (slotsToInsert.length) {
+            const { error: upsertError } = await supabase
+              .from("attendance_records")
+              .upsert(slotsToInsert, {
+                onConflict: "slot_id,date",
+                ignoreDuplicates: true,
+              });
 
-          if (upsertError) {
-            throw upsertError;
+            if (upsertError) {
+              throw upsertError;
+            }
           }
         }
       }
@@ -482,6 +485,10 @@ export default function DashboardPage() {
           if (pastDates.length > 0) {
             const candidateBackfills: Array<{ slot_id: string; date: string }> = [];
             for (const { dateIso, dayOfWeek } of pastDates) {
+              if (holidayDates.has(dateIso)) {
+                continue;
+              }
+
               const matchingSlots = statSlots.filter(
                 (s) => s.day_of_week === dayOfWeek
               );
@@ -790,10 +797,29 @@ export default function DashboardPage() {
           setSubjectStats([]);
           setAlerts([]);
           setOverrides({});
+          setHolidays([]);
           return;
         }
 
         setActiveSemester(semester);
+        const { data: holidayRows, error: holidaysError } = await supabase
+          .from("holidays")
+          .select("date, reason")
+          .eq("semester_id", semester.id)
+          .order("date", { ascending: true });
+
+        if (holidaysError) {
+          throw holidaysError;
+        }
+
+        const semesterHolidays = (holidayRows ?? []) as Array<{
+          date: string;
+          reason: string;
+        }>;
+        setHolidays(semesterHolidays);
+        const holidayDates = new Set(
+          semesterHolidays.map((holiday) => holiday.date)
+        );
         const statSlots = await loadStats(semester);
 
         const { data: slotRows, error: slotsError } = await supabase
@@ -841,7 +867,13 @@ export default function DashboardPage() {
 
         setOverrides(overrideMap);
 
-        await autoMarkPastSlots(typedSlots, overrideMap, semester, statSlots ?? []);
+        await autoMarkPastSlots(
+          typedSlots,
+          overrideMap,
+          semester,
+          statSlots ?? [],
+          holidayDates
+        );
         await loadStats(semester);
 
         const { data: attendanceRows, error: attendanceError } = await supabase
@@ -1003,18 +1035,6 @@ export default function DashboardPage() {
 
     void loadCalendarData();
   }, [activeSemester, displayedMonth, supabase, backfillDone, userId]);
-
-  useEffect(() => {
-    if (!userId || !activeSemester?.id) return;
-    void (async () => {
-      const { data } = await supabase
-        .from("holidays")
-        .select("date, reason")
-        .eq("semester_id", activeSemester.id)
-        .order("date", { ascending: true });
-      setHolidays((data ?? []) as Array<{ date: string; reason: string }>);
-    })();
-  }, [activeSemester, supabase, userId]);
 
   const exportCSV = () => {
     const headers = [
