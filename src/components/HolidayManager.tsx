@@ -293,7 +293,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
               <Calendar className="h-5 w-5 text-primary" />
               Holiday Manager
             </CardTitle>
-            <CardDescription className="mt-1">
+            <CardDescription className="mt-1 break-words">
               Manage your semester holidays by importing notice files or adding them manually.
             </CardDescription>
           </div>
@@ -333,7 +333,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
         {parsedHolidays.length > 0 && (
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-4">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="default">Parsed Results</Badge>
                 <span className="text-xs text-muted-foreground">
                   {parsedHolidays.filter((item) => item.checked).length} of{" "}
@@ -344,7 +344,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  size="xs"
+                  size="default"
                   onClick={toggleSelectAllParsed}
                   className="text-xs"
                 >
@@ -354,7 +354,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
                 </Button>
                 <Button
                   type="button"
-                  size="xs"
+                  size="default"
                   disabled={isSavingParsed}
                   onClick={() => void handleSaveSelectedParsed()}
                 >
@@ -378,21 +378,23 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
                     e.preventDefault();
                     toggleParsedItem(item.id);
                   }}
-                  className={`flex items-center justify-between p-3 rounded-lg border text-sm cursor-pointer transition-colors ${
+                  className={`flex flex-col items-start justify-between gap-3 rounded-lg border p-3 text-sm cursor-pointer transition-colors sm:flex-row sm:items-center ${
                     item.checked
                       ? "border-primary/40 bg-background"
                       : "border-border/60 bg-muted/30 text-muted-foreground"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={item.checked}
-                      readOnly
-                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                    />
-                    <div>
-                      <span className="font-medium text-foreground">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex min-h-11 min-w-11 items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={item.checked}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                    </span>
+                    <div className="min-w-0">
+                      <span className="min-w-0 break-words font-medium text-foreground">
                         {item.reason}
                       </span>
                     </div>
@@ -427,7 +429,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
                 required
               />
             </div>
-            <Button type="submit" disabled={isAddingManual}>
+            <Button type="submit" disabled={isAddingManual} className="w-full sm:w-auto">
               {isAddingManual ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -445,7 +447,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
 
         {/* Saved Holidays List at Bottom */}
         <div className="space-y-3 pt-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Label className="text-sm font-medium">Saved Holidays</Label>
             <Badge variant="secondary">{savedHolidays.length} Total</Badge>
           </div>
@@ -464,10 +466,10 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
               {savedHolidays.map((holiday) => (
                 <div
                   key={holiday.id}
-                  className="flex items-center justify-between rounded-lg border p-3 bg-card hover:bg-muted/40 transition-colors"
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3 bg-card hover:bg-muted/40 transition-colors"
                 >
-                  <div className="space-y-0.5">
-                    <p className="font-medium text-sm text-foreground">
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="min-w-0 break-words font-medium text-sm text-foreground">
                       {holiday.reason}
                     </p>
                     <p className="text-xs font-mono text-muted-foreground">
@@ -480,7 +482,7 @@ export function HolidayManager({ semesterId }: HolidayManagerProps) {
                     size="icon-sm"
                     disabled={deletingId === holiday.id}
                     onClick={() => void handleDeleteHoliday(holiday.id)}
-                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    className="size-11 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     title="Delete holiday"
                   >
                     {deletingId === holiday.id ? (

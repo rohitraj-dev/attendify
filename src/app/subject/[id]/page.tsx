@@ -401,7 +401,7 @@ export default function SubjectDetailPage() {
             variant="outline"
             size="icon"
             onClick={() => router.push("/dashboard")}
-            className="shrink-0 rounded-full dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            className="size-11 shrink-0 rounded-full dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
           >
             <ArrowLeft className="h-4 w-4" />
             <span className="sr-only">Back to Dashboard</span>
@@ -413,9 +413,9 @@ export default function SubjectDetailPage() {
               <div className="h-4 w-24 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" />
             </div>
           ) : subject ? (
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-bold tracking-tight">{subject.name}</h1>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight">{subject.name}</h1>
                 <Badge variant="outline" className="text-xs font-semibold dark:border-zinc-700">
                   {subject.code}
                 </Badge>
@@ -474,9 +474,9 @@ export default function SubjectDetailPage() {
           <Card className="border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30">
             <CardContent className="flex items-center gap-3 p-6 text-red-700 dark:text-red-400">
               <AlertCircle className="h-5 w-5 shrink-0" />
-              <div>
+              <div className="min-w-0">
                 <p className="font-semibold">Error</p>
-                <p className="text-sm">{error}</p>
+                <p className="min-w-0 break-words text-sm">{error}</p>
               </div>
             </CardContent>
           </Card>
@@ -494,7 +494,7 @@ export default function SubjectDetailPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-baseline justify-between">
+                <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
                   <span className="text-3xl font-bold tracking-tight">
                     {overallPercentage !== null ? `${overallPercentage}%` : "N/A"}
                   </span>
@@ -536,7 +536,7 @@ export default function SubjectDetailPage() {
                   Semester Overview
                 </CardTitle>
                 {semester && (
-                  <CardDescription>
+                  <CardDescription className="break-words">
                     {semester.name} ({formatDateRecord(semester.start_date)} - {formatDateRecord(semester.end_date)})
                   </CardDescription>
                 )}
@@ -678,12 +678,12 @@ export default function SubjectDetailPage() {
                     {sortedSlots.map((slot) => (
                       <div
                         key={slot.id}
-                        className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900/60"
+                        className="flex min-w-0 flex-col items-start justify-between gap-1 rounded-lg border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900/60 sm:flex-row sm:items-center"
                       >
-                        <span className="font-medium text-sm text-zinc-900 dark:text-zinc-100">
+                        <span className="min-w-0 break-words font-medium text-sm text-zinc-900 dark:text-zinc-100">
                           {DAY_NAMES[slot.day_of_week] ?? `Day ${slot.day_of_week}`}
                         </span>
-                        <Badge variant="secondary" className="text-xs font-normal dark:bg-zinc-800 dark:text-zinc-300">
+                        <Badge variant="secondary" className="gap-1 text-xs font-normal dark:bg-zinc-800 dark:text-zinc-300">
                           {formatTimeRange(slot.start_time, slot.end_time)}
                         </Badge>
                       </div>
@@ -754,6 +754,7 @@ export default function SubjectDetailPage() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                className="w-full max-sm:min-h-11 sm:w-auto"
                                 onClick={() => void toggleAttendance(record)}
                                 disabled={updatingRecordKey === `${record.slot_id}-${record.date}`}
                               >
