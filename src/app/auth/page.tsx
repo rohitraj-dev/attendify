@@ -95,8 +95,8 @@ export default function AuthPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-background text-foreground">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1 text-center">
+      <Card className="w-full min-w-0 max-w-md p-4 sm:p-6">
+        <CardHeader className="space-y-1 p-0 text-center">
           <CardTitle className="text-2xl font-bold tracking-tight">
             Welcome to Attendify
           </CardTitle>
@@ -108,7 +108,7 @@ export default function AuthPage() {
           <Button
             variant="outline"
             type="button"
-            className="w-full flex items-center justify-center gap-2"
+            className="w-full flex items-center justify-center gap-2 max-sm:min-h-11"
             onClick={handleGoogleAuth}
           >
             <GoogleIcon className="size-4" />
@@ -126,8 +126,8 @@ export default function AuthPage() {
 
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="login">Login</TabsTrigger>
-              <TabsTrigger value="signup">Sign Up</TabsTrigger>
+              <TabsTrigger className="max-sm:min-h-11" value="login">Login</TabsTrigger>
+              <TabsTrigger className="max-sm:min-h-11" value="signup">Sign Up</TabsTrigger>
             </TabsList>
 
             <TabsContent value="login">
@@ -140,6 +140,7 @@ export default function AuthPage() {
                     placeholder="name@example.com"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
+                    className="max-sm:min-h-11 max-sm:text-base"
                     required
                   />
                 </div>
@@ -151,14 +152,15 @@ export default function AuthPage() {
                     placeholder="••••••••"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
+                    className="max-sm:min-h-11 max-sm:text-base"
                     required
                   />
                 </div>
-                <Button type="submit" className="w-full mt-2">
+                <Button type="submit" className="w-full mt-2 max-sm:min-h-11">
                   Login
                 </Button>
                 {loginError && (
-                  <p className="text-sm font-medium text-destructive text-center mt-2">
+                  <p className="break-words text-sm font-medium text-destructive text-center mt-2">
                     {loginError}
                   </p>
                 )}
@@ -175,6 +177,7 @@ export default function AuthPage() {
                     placeholder="name@example.com"
                     value={signupEmail}
                     onChange={(e) => setSignupEmail(e.target.value)}
+                    className="max-sm:min-h-11 max-sm:text-base"
                     required
                   />
                 </div>
@@ -186,6 +189,7 @@ export default function AuthPage() {
                     placeholder="••••••••"
                     value={signupPassword}
                     onChange={(e) => setSignupPassword(e.target.value)}
+                    className="max-sm:min-h-11 max-sm:text-base"
                     required
                   />
                 </div>
@@ -197,14 +201,15 @@ export default function AuthPage() {
                     placeholder="••••••••"
                     value={signupConfirmPassword}
                     onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                    className="max-sm:min-h-11 max-sm:text-base"
                     required
                   />
                 </div>
-                <Button type="submit" className="w-full mt-2">
+                <Button type="submit" className="w-full mt-2 max-sm:min-h-11">
                   Sign Up
                 </Button>
                 {signupError && (
-                  <p className="text-sm font-medium text-destructive text-center mt-2">
+                  <p className="break-words text-sm font-medium text-destructive text-center mt-2">
                     {signupError}
                   </p>
                 )}

@@ -420,12 +420,12 @@ export default function SetupPage() {
       <Toaster />
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="min-w-0">
               <p className="text-sm font-medium text-muted-foreground">
                 Attendify Setup
               </p>
-              <h1 className="text-3xl font-semibold tracking-tight">
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                 Setup wizard
               </h1>
             </div>
@@ -447,7 +447,34 @@ export default function SetupPage() {
 
           <Progress value={progressValue} className="h-2" />
 
-          <div className="grid gap-2 sm:grid-cols-4">
+          <div className="flex items-center justify-between gap-2 sm:hidden">
+            {stepLabels.map((label, index) => {
+              const stepNumber = index + 1;
+              const isActive = stepNumber === currentStep;
+              const isComplete = stepNumber < currentStep;
+
+              return (
+                <div
+                  key={label}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border text-xs font-semibold ${
+                    isActive
+                      ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
+                      : isComplete
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : "border-zinc-300 text-muted-foreground dark:border-zinc-700"
+                  }`}
+                  aria-label={`Step ${stepNumber}: ${label}`}
+                >
+                  {stepNumber}
+                </div>
+              );
+            })}
+            <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
+              {stepLabels[currentStep - 1]}
+            </span>
+          </div>
+
+          <div className="hidden gap-2 sm:grid sm:grid-cols-4">
             {stepLabels.map((label, index) => {
               const stepNumber = index + 1;
               const isActive = stepNumber === currentStep;
@@ -555,7 +582,7 @@ export default function SetupPage() {
                           isSelected
                             ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
                             : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                        }`}
+                        } max-sm:min-h-11 max-sm:w-full`}
                       >
                         {num}
                       </button>
@@ -575,7 +602,7 @@ export default function SetupPage() {
                         key={branch}
                         type="button"
                         onClick={() => setSelectedBranch(branch)}
-                        className={`rounded-xl border p-4 text-left transition-colors ${
+                        className={`w-full rounded-xl border p-4 text-left transition-colors max-sm:min-h-11 ${
                           isSelected
                             ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
                             : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
@@ -655,15 +682,15 @@ export default function SetupPage() {
                     </Badge>
                   </div>
                   <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
-                    <table className="min-w-full text-left text-sm">
+                    <table className="min-w-full whitespace-nowrap text-left text-sm">
                       <thead className="bg-zinc-50 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                         <tr>
-                          <th className="px-4 py-3 font-medium">Use</th>
-                          <th className="px-4 py-3 font-medium">Subject</th>
-                          <th className="px-4 py-3 font-medium">Code</th>
-                          <th className="px-4 py-3 font-medium">Day</th>
-                          <th className="px-4 py-3 font-medium">Start</th>
-                          <th className="px-4 py-3 font-medium">End</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">Use</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">Subject</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">Code</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">Day</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">Start</th>
+                          <th className="px-2 py-3 font-medium sm:px-4">End</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -672,7 +699,7 @@ export default function SetupPage() {
                             key={slot.id}
                             className="border-t border-zinc-200 dark:border-zinc-800"
                           >
-                            <td className="px-4 py-3">
+                            <td className="px-2 py-3 sm:px-4">
                               <input
                                 type="checkbox"
                                 checked={slot.checked}
@@ -680,13 +707,13 @@ export default function SetupPage() {
                                 className="h-4 w-4 rounded border-zinc-300"
                               />
                             </td>
-                            <td className="px-4 py-3">{slot.subject_code}</td>
-                            <td className="px-4 py-3">{slot.subject_code}</td>
-                            <td className="px-4 py-3">
+                            <td className="px-2 py-3 sm:px-4">{slot.subject_code}</td>
+                            <td className="px-2 py-3 sm:px-4">{slot.subject_code}</td>
+                            <td className="px-2 py-3 sm:px-4">
                               {dayLabels[slot.day - 1] ?? `Day ${slot.day}`}
                             </td>
-                            <td className="px-4 py-3">{slot.start_time}</td>
-                            <td className="px-4 py-3">{slot.end_time}</td>
+                            <td className="px-2 py-3 sm:px-4">{slot.start_time}</td>
+                            <td className="px-2 py-3 sm:px-4">{slot.end_time}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -695,19 +722,20 @@ export default function SetupPage() {
                 </div>
               ) : null}
             </CardContent>
-            <CardFooter className="justify-between gap-3">
-              <Button variant="outline" onClick={() => setCurrentStep(2)}>
+            <CardFooter className="flex-col justify-between gap-3 sm:flex-row">
+              <Button className="w-full sm:w-auto" variant="outline" onClick={() => setCurrentStep(2)}>
                 Back
               </Button>
-              <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="flex w-full flex-col items-stretch justify-end gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                 <Button
                   type="button"
                   variant="outline"
+                  className="w-full sm:w-auto"
                   onClick={() => setCurrentStep(4)}
                 >
                   Skip
                 </Button>
-                <div className="flex items-center gap-2">
+                <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
                   <Label htmlFor="preset-branch-select" className="text-sm font-medium">
                     Branch
                   </Label>
@@ -715,7 +743,7 @@ export default function SetupPage() {
                     value={presetBranch}
                     onValueChange={(val) => setPresetBranch(val)}
                   >
-                    <SelectTrigger id="preset-branch-select" className="w-[100px]">
+                    <SelectTrigger id="preset-branch-select" className="w-full sm:w-[100px]">
                       <SelectValue placeholder="Branch" />
                     </SelectTrigger>
                     <SelectContent>
@@ -727,6 +755,7 @@ export default function SetupPage() {
                 <Button
                   type="button"
                   variant="outline"
+                  className="w-full sm:w-auto"
                   disabled={isParsingTimetable || isSavingSchedule}
                   onClick={() => void handleLoadPreset()}
                 >
@@ -735,6 +764,7 @@ export default function SetupPage() {
                 <Button
                   type="button"
                   variant="outline"
+                  className="w-full sm:w-auto"
                   disabled={!previewUrl || isParsingTimetable}
                   onClick={() => void handleParseTimetable()}
                 >
@@ -742,6 +772,7 @@ export default function SetupPage() {
                 </Button>
                 <Button
                   type="button"
+                  className="w-full sm:w-auto"
                   disabled={!parsedSlots.length || isSavingSchedule}
                   onClick={() => void handleSaveSchedule()}
                 >
@@ -790,28 +821,28 @@ export default function SetupPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Semester</p>
-                <p className="mt-1 font-medium">
+                <p className="mt-1 min-w-0 break-words font-medium">
                   {savedSemester?.name ?? semesterName}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Date range</p>
-                <p className="mt-1 font-medium">
+                <p className="mt-1 min-w-0 break-words font-medium">
                   {(savedSemester?.start_date ?? semesterStartDate) || "-"} to{" "}
                   {(savedSemester?.end_date ?? semesterEndDate) || "-"}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Branch & Semester</p>
-                <p className="mt-1 font-medium">
+                <p className="mt-1 min-w-0 break-words font-medium">
                   {selectedBranch ?? "-"} {semesterNumber ? `(${semesterNumber})` : ""}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
                 <p className="text-sm text-muted-foreground">Holidays</p>
-                <p className="mt-1 font-medium">Configured</p>
+                <p className="mt-1 min-w-0 break-words font-medium">Configured</p>
               </div>
             </CardContent>
             <CardFooter className="justify-between gap-3">
