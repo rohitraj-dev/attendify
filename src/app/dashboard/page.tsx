@@ -2029,7 +2029,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <CardTitle>{formatMonthLabel(displayedMonth)}</CardTitle>
+                  <CardTitle className="min-w-0 truncate">{formatMonthLabel(displayedMonth)}</CardTitle>
                   <CardDescription>
                     Monthly attendance overview for the active semester
                   </CardDescription>
@@ -2039,6 +2039,7 @@ export default function DashboardPage() {
                     type="button"
                     variant="ghost"
                     size="icon-sm"
+                    aria-label="Previous month"
                     onClick={() => {
                       setDisplayedMonth(
                         new Date(
@@ -2057,6 +2058,7 @@ export default function DashboardPage() {
                     type="button"
                     variant="ghost"
                     size="icon-sm"
+                    aria-label="Next month"
                     onClick={() => {
                       setDisplayedMonth(
                         new Date(
@@ -2078,7 +2080,7 @@ export default function DashboardPage() {
                   <p className="text-sm text-red-600">{calendarError}</p>
                 ) : null}
 
-                <div className="grid grid-cols-7 gap-2">
+                <div className="grid grid-cols-7 gap-2 max-sm:gap-0.5">
                   {WEEKDAY_LABELS.map((label) => (
                     <div
                       key={label}
@@ -2102,14 +2104,16 @@ export default function DashboardPage() {
                         type="button"
                         disabled={!isCurrentMonth}
                         onClick={() => setSelectedCalendarDate(dateKey)}
-                        className={`min-h-24 rounded-xl border p-2 text-left transition ${
+                        className={`rounded-xl border p-2 text-left transition max-sm:aspect-square max-sm:p-1 ${
+                          isSelected ? "ring-2 ring-zinc-900/10 max-sm:bg-zinc-100 dark:max-sm:bg-zinc-800" : ""
+                        } ${
                           isCurrentMonth
                             ? "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
                             : "border-zinc-100 bg-zinc-50 text-zinc-400 dark:border-zinc-900 dark:bg-zinc-950 dark:text-zinc-600"
-                        } ${isSelected ? "ring-2 ring-zinc-900/10" : ""}`}
+                        } sm:min-h-24`}
                       >
                         <span
-                          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${
+                          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold max-sm:text-sm ${
                             isToday
                               ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
                               : isCurrentMonth
@@ -2119,11 +2123,11 @@ export default function DashboardPage() {
                         >
                           {day.getDate()}
                         </span>
-                        <div className="mt-3 flex flex-wrap gap-1">
-                          {dayRecords.map((record, index) => (
+                        <div className="mt-3 flex flex-wrap gap-1 max-sm:mt-1 max-sm:justify-center max-sm:gap-0.5">
+                          {dayRecords.slice(0, 4).map((record, index) => (
                             <span
                               key={`${record.slot_id}-${record.status}-${index}`}
-                              className={`h-2.5 w-2.5 rounded-full ${getCalendarDotClass(
+                              className={`h-2.5 w-2.5 rounded-full max-sm:h-1.5 max-sm:w-1.5 ${getCalendarDotClass(
                                 record.status
                               )}`}
                             />
@@ -2162,16 +2166,16 @@ export default function DashboardPage() {
                             key={item.id}
                             className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:flex-row sm:items-center sm:justify-between"
                           >
-                            <div>
-                              <p className="text-sm font-medium text-zinc-900">
+                            <div className="min-w-0">
+                              <p className="min-w-0 break-words text-sm font-medium text-zinc-900">
                                 {item.subjectName}
                               </p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="min-w-0 break-words text-xs text-muted-foreground">
                                 {item.subjectCode ? `${item.subjectCode} • ` : ""}
                                 {item.timeRange}
                               </p>
                             </div>
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:flex-wrap">
                               <Badge
                                 className={
                                   item.status === "present"
@@ -2189,6 +2193,7 @@ export default function DashboardPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
+                                  className="w-full sm:w-auto"
                                   disabled={pendingCalendarSlotIds.includes(item.id)}
                                   onClick={() => void handleCalendarUncancelClass(item.id, selectedCalendarDate!)}
                                 >
@@ -2199,6 +2204,7 @@ export default function DashboardPage() {
                                   <Button
                                     size="sm"
                                     variant="outline"
+                                    className="w-full sm:w-auto"
                                     disabled={pendingCalendarSlotIds.includes(item.id)}
                                     onClick={() => void handleCalendarToggle(item.id, selectedCalendarDate!, item.status)}
                                   >
@@ -2207,6 +2213,7 @@ export default function DashboardPage() {
                                   <Button
                                     size="sm"
                                     variant="outline"
+                                    className="w-full sm:w-auto"
                                     disabled={pendingCalendarSlotIds.includes(item.id)}
                                     onClick={() => void handleCalendarCancelClass(item.id, selectedCalendarDate!)}
                                   >
@@ -2237,24 +2244,28 @@ export default function DashboardPage() {
                 <CardTitle>{formatMonthLabel(academicMonth)}</CardTitle>
                 <div className="flex gap-2">
                   <Button
-                    size="sm"
+                    size="icon-sm"
                     variant="outline"
+                    className="max-sm:min-h-11 max-sm:min-w-11"
+                    aria-label="Previous month"
                     onClick={() => {
                       setAcademicMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
                       setSelectedAcademicDate(null);
                     }}
                   >
-                    ‹
+                    <ChevronLeft />
                   </Button>
                   <Button
-                    size="sm"
+                    size="icon-sm"
                     variant="outline"
+                    className="max-sm:min-h-11 max-sm:min-w-11"
+                    aria-label="Next month"
                     onClick={() => {
                       setAcademicMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
                       setSelectedAcademicDate(null);
                     }}
                   >
-                    ›
+                    <ChevronRight />
                   </Button>
                 </div>
               </CardHeader>
@@ -2278,7 +2289,7 @@ export default function DashboardPage() {
                         key={dateKey}
                         onClick={() => setSelectedAcademicDate(dateKey === selectedAcademicDate ? null : dateKey)}
                         className={[
-                          "flex flex-col items-center rounded-lg py-1 text-sm transition-colors",
+                          "flex max-sm:min-h-11 flex-col items-center rounded-lg py-1 text-sm transition-colors",
                           !isCurrentMonth ? "opacity-30" : "",
                           isSelected ? "bg-zinc-200 dark:bg-zinc-700" : "hover:bg-zinc-100 dark:hover:bg-zinc-800",
                           isToday ? "font-bold text-blue-600 dark:text-blue-400" : "",
@@ -2332,7 +2343,7 @@ export default function DashboardPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Reschedule Class</DialogTitle>
             <DialogDescription>
@@ -2345,7 +2356,10 @@ export default function DashboardPage() {
             value={rescheduleTime}
             onChange={(event) => setRescheduleTime(event.target.value)}
           />
-          <DialogFooter showCloseButton>
+          <DialogFooter
+            showCloseButton
+            className="max-sm:[&>button]:w-full sm:flex-row"
+          >
             <Button
               type="button"
               disabled={!rescheduleSlotId || !rescheduleTime}
