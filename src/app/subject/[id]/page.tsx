@@ -159,6 +159,7 @@ export default function SubjectDetailPage() {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingRecordKey, setUpdatingRecordKey] = useState<string | null>(null);
 
   useEffect(() => {
     async function getAuthUser() {
@@ -269,6 +270,39 @@ export default function SubjectDetailPage() {
 
     void fetchSubjectDetail();
   }, [userId, subjectId, supabase]);
+
+  async function toggleAttendance(record: AttendanceRecord) {
+    if (record.status === "cancelled") return;
+
+    const nextStatus = record.status === "present" ? "absent" : "present";
+    const recordKey = `${record.slot_id}-${record.date}`;
+    setUpdatingRecordKey(recordKey);
+    setError(null);
+
+    try {
+      const { error: updateError } = await supabase
+        .from("attendance_records")
+        .update({ status: nextStatus, marked_by: "manual" })
+        .eq("slot_id", record.slot_id)
+        .eq("date", record.date);
+
+      if (updateError) throw updateError;
+
+      setRecords((currentRecords) =>
+        currentRecords.map((currentRecord) =>
+          currentRecord.slot_id === record.slot_id &&
+          currentRecord.date === record.date
+            ? { ...currentRecord, status: nextStatus }
+            : currentRecord
+        )
+      );
+    } catch (err) {
+      console.error("Failed to update attendance record:", err);
+      setError(err instanceof Error ? err.message : "Failed to update attendance record");
+    } finally {
+      setUpdatingRecordKey(null);
+    }
+  }
 
   // Statistics calculation
   const presentCount = records.filter((r) => r.status === "present").length;
@@ -714,7 +748,20 @@ export default function SubjectDetailPage() {
                               {formatDateRecord(record.date)}
                             </span>
                           </div>
-                          <div>{getStatusBadge(record.status)}</div>
+                          <div className="flex items-center gap-2">
+                            {isPresent || isAbsent ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void toggleAttendance(record)}
+                                disabled={updatingRecordKey === `${record.slot_id}-${record.date}`}
+                              >
+                                {isPresent ? "Mark Absent" : "Mark Present"}
+                              </Button>
+                            ) : null}
+                            {getStatusBadge(record.status)}
+                          </div>
                         </div>
                       );
                     })}

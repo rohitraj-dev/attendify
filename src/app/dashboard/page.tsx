@@ -686,6 +686,7 @@ export default function DashboardPage() {
             for (const slot of subjectSlots) {
               if (
                 slot.day_of_week === dayOfWeek &&
+                !holidayDates.has(isoDate) &&
                 !cancelledOverrideSet.has(`${slot.id}:${isoDate}`)
               ) {
                 remainingClasses += 1;
