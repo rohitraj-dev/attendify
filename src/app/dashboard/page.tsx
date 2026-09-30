@@ -546,7 +546,10 @@ export default function DashboardPage() {
       setBackfillDone(true);
     }
 
-    async function loadStats(activeSemester: ActiveSemester) {
+    async function loadStats(
+      activeSemester: ActiveSemester,
+      holidayDates: Set<string>
+    ) {
       const { data: subjects, error: subjectsError } = await supabase
         .from("subjects")
         .select("id, name, code, min_attendance_percent")
@@ -821,7 +824,7 @@ export default function DashboardPage() {
         const holidayDates = new Set(
           semesterHolidays.map((holiday) => holiday.date)
         );
-        const statSlots = await loadStats(semester);
+        const statSlots = await loadStats(semester, holidayDates);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -875,7 +878,7 @@ export default function DashboardPage() {
           statSlots ?? [],
           holidayDates
         );
-        await loadStats(semester);
+        await loadStats(semester, holidayDates);
 
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
