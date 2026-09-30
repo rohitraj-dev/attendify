@@ -13,6 +13,7 @@ import {
   MoreVertical,
   Settings,
   Sun,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -351,6 +352,11 @@ export default function DashboardPage() {
   const todayIso = today.toISOString().split("T")[0];
   const localTodayIso = formatLocalDateIso(today);
   const headerDate = formatDisplayDate(today);
+  const mobileHeaderDate = new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(today);
 
   useEffect(() => {
     async function getAuthUser() {
@@ -1584,15 +1590,15 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background px-4 py-8 text-foreground">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <p className="text-sm font-medium text-muted-foreground">
               {activeSemester?.name ?? "Attendify"}
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">
-              Today — {headerDate}
+              Today — <span className="sm:hidden">{mobileHeaderDate}</span><span className="hidden sm:inline">{headerDate}</span>
             </h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <a href="/setup">
               <Button
                 type="button"
@@ -1600,6 +1606,7 @@ export default function DashboardPage() {
                 size="icon-sm"
                 className="shrink-0"
                 title="Go to Setup"
+                aria-label="Go to Setup"
               >
                 <Settings />
                 <span className="sr-only">Setup</span>
@@ -1611,6 +1618,7 @@ export default function DashboardPage() {
               size="icon-sm"
               className="shrink-0"
               onClick={handleThemeToggle}
+              aria-label="Toggle theme"
             >
               {isDarkMode ? <Sun /> : <Moon />}
               <span className="sr-only">Toggle theme</span>
@@ -1625,6 +1633,7 @@ export default function DashboardPage() {
                 router.push("/auth");
               }}
               title="Logout"
+              aria-label="Logout"
             >
               <LogOut />
               <span className="sr-only">Logout</span>
@@ -1636,6 +1645,7 @@ export default function DashboardPage() {
                   variant="ghost"
                   size="icon-sm"
                   className="relative shrink-0"
+                  aria-label="Open notifications"
                 >
                   <Bell />
                   {unreadAlertCount > 0 ? (
@@ -1660,7 +1670,7 @@ export default function DashboardPage() {
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="default"
                     disabled={unreadAlertCount === 0}
                     onClick={() =>
                       setReadAlerts(new Set(alerts.map((alert) => getAlertKey(alert))))
@@ -1669,7 +1679,7 @@ export default function DashboardPage() {
                     Mark all as read
                   </Button>
                 </div>
-                <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pb-4">
                   {alerts.length ? (
                     alerts.map((alert) => {
                       const isUnread = !readAlerts.has(getAlertKey(alert));
@@ -1704,7 +1714,7 @@ export default function DashboardPage() {
                             )}
                           </div>
                           <p
-                            className={`text-sm font-medium ${
+                            className={`min-w-0 break-words text-sm font-medium ${
                               alert.type === "danger"
                                 ? "text-red-700 dark:text-red-200"
                                 : "text-amber-700 dark:text-amber-200"
@@ -1729,11 +1739,11 @@ export default function DashboardPage() {
         </div>
 
         <Tabs defaultValue="today" className="gap-4">
-          <TabsList>
-            <TabsTrigger value="today">Today</TabsTrigger>
-            <TabsTrigger value="stats">Stats</TabsTrigger>
-            <TabsTrigger value="calendar">Calendar</TabsTrigger>
-            <TabsTrigger value="academic">Academic</TabsTrigger>
+          <TabsList className="max-sm:grid max-sm:w-full max-sm:grid-cols-4">
+            <TabsTrigger className="text-xs sm:text-sm" value="today">Today</TabsTrigger>
+            <TabsTrigger className="text-xs sm:text-sm" value="stats">Stats</TabsTrigger>
+            <TabsTrigger className="text-xs sm:text-sm" value="calendar">Calendar</TabsTrigger>
+            <TabsTrigger className="text-xs sm:text-sm" value="academic">Academic</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="space-y-4">
@@ -1756,13 +1766,16 @@ export default function DashboardPage() {
                       : "border-amber-200 bg-amber-50 text-amber-700"
                   }`}
                 >
-                  <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex items-start gap-2">
                     <span className="text-sm">⚠</span>
-                    <p className="text-sm font-medium">{alert.message}</p>
+                    <p className="min-w-0 break-words text-sm font-medium">{alert.message}</p>
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="text-sm font-medium"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0"
+                    aria-label="Dismiss alert"
                     onClick={() =>
                       setDismissedAlerts((current) => {
                         const next = new Set(current);
@@ -1771,8 +1784,8 @@ export default function DashboardPage() {
                       })
                     }
                   >
-                    X
-                  </button>
+                    <X />
+                  </Button>
                 </div>
               ))}
 
@@ -1901,12 +1914,12 @@ export default function DashboardPage() {
           <TabsContent value="stats" className="space-y-4">
             {subjectStats.length ? (
               <>
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={exportCSV}
-                    className="flex items-center gap-2"
+                    className="w-full flex items-center gap-2 sm:w-auto"
                   >
                     <Download className="h-4 w-4" />
                     Export CSV
@@ -1915,7 +1928,7 @@ export default function DashboardPage() {
                     variant="outline"
                     size="sm"
                     onClick={exportPDF}
-                    className="flex items-center gap-2"
+                    className="w-full flex items-center gap-2 sm:w-auto"
                   >
                     <FileText className="h-4 w-4" />
                     Export PDF
@@ -1929,8 +1942,8 @@ export default function DashboardPage() {
                     onClick={() => router.push(`/subject/${subject.id}`)}
                   >
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <div>
-                        <CardTitle>{subject.name}</CardTitle>
+                      <div className="min-w-0">
+                        <CardTitle className="min-w-0 break-words">{subject.name}</CardTitle>
                         <CardDescription>{subject.code}</CardDescription>
                       </div>
                       <ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
@@ -1943,7 +1956,7 @@ export default function DashboardPage() {
                       ) : (
                         <>
                           <div className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">
+                            <span className="min-w-0 break-words text-muted-foreground">
                               {subject.attended} / {subject.totalHeld} classes attended so far
                             </span>
                             <span className="font-semibold text-zinc-900 dark:text-zinc-100">
