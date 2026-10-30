@@ -501,6 +501,12 @@ export default function DashboardPage() {
     setSelectedCalendarDate(null);
   }
 
+  function goToTodayCalendarDate() {
+    setDisplayedMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedCalendarDate(localTodayIso);
+    setSelectedBulkDates(new Set());
+  }
+
   function handleCalendarTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
     if (selectDaysMode) {
       calendarTouchStart.current = null;
@@ -2793,6 +2799,19 @@ export default function DashboardPage() {
                       >
                         <ChevronLeft />
                         <span className="sr-only">Previous month</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11 px-3 sm:min-h-8"
+                        disabled={
+                          displayedMonth.getFullYear() === today.getFullYear() &&
+                          displayedMonth.getMonth() === today.getMonth() &&
+                          selectedCalendarDate === localTodayIso
+                        }
+                        onClick={goToTodayCalendarDate}
+                      >
+                        Today
                       </Button>
                       <Button
                         type="button"
