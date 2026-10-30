@@ -13,6 +13,15 @@ export interface Holiday {
   reason: string;
 }
 
+export interface Exam {
+  id: string;
+  semester_id: string;
+  subject_id: string | null;
+  date: string;
+  title: string;
+  created_at: string;
+}
+
 export interface Subject {
   id: string;
   semester_id: string;

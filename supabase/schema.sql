@@ -32,6 +32,15 @@ create table public.subjects (
     check (min_attendance_percent >= 0 and min_attendance_percent <= 100)
 );
 
+create table public.exams (
+  id uuid primary key default gen_random_uuid(),
+  semester_id uuid not null references public.semesters (id) on delete cascade,
+  subject_id uuid references public.subjects (id) on delete set null,
+  date date not null,
+  title text not null default 'Exam',
+  created_at timestamptz default now()
+);
+
 create table public.schedule_slots (
   id uuid primary key default gen_random_uuid(),
   subject_id uuid not null references public.subjects (id) on delete cascade,
@@ -67,6 +76,8 @@ create index idx_semesters_start_date on public.semesters (start_date);
 create index idx_semesters_end_date on public.semesters (end_date);
 create index idx_holidays_semester_id on public.holidays (semester_id);
 create index idx_holidays_date on public.holidays (date);
+create index idx_exams_semester_id on public.exams (semester_id);
+create index idx_exams_subject_id on public.exams (subject_id);
 create index idx_subjects_semester_id on public.subjects (semester_id);
 create index idx_day_overrides_slot_id on public.day_overrides (slot_id);
 create index idx_day_overrides_date on public.day_overrides (date);
@@ -117,6 +128,7 @@ $$;
 
 alter table public.semesters enable row level security;
 alter table public.holidays enable row level security;
+alter table public.exams enable row level security;
 alter table public.subjects enable row level security;
 alter table public.schedule_slots enable row level security;
 alter table public.day_overrides enable row level security;
@@ -131,6 +143,13 @@ with check (user_id = auth.uid());
 
 create policy "authenticated users manage own holidays"
 on public.holidays
+for all
+to authenticated
+using (public.is_semester_owner(semester_id))
+with check (public.is_semester_owner(semester_id));
+
+create policy "authenticated users manage own exams"
+on public.exams
 for all
 to authenticated
 using (public.is_semester_owner(semester_id))
