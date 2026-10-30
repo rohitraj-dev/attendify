@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -395,6 +396,12 @@ export default function DashboardPage() {
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [pendingCalendarSlotIds, setPendingCalendarSlotIds] = useState<string[]>([]);
+  const [holidayDialog, setHolidayDialog] = useState<"add" | "remove" | null>(
+    null
+  );
+  const [holidayReason, setHolidayReason] = useState("Holiday");
+  const [isHolidaySaving, setIsHolidaySaving] = useState(false);
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
   const [academicMonth, setAcademicMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -1003,7 +1010,7 @@ export default function DashboardPage() {
     }
 
     void loadDashboard();
-  }, [supabase, todayDayOfWeek, todayIso, userId]);
+  }, [supabase, todayDayOfWeek, todayIso, userId, calendarRefreshKey]);
 
   useEffect(() => {
     async function loadCalendarData() {
@@ -1123,7 +1130,15 @@ export default function DashboardPage() {
     }
 
     void loadCalendarData();
-  }, [activeSemester, displayedMonth, supabase, backfillDone, userId, weekStart]);
+  }, [
+    activeSemester,
+    displayedMonth,
+    supabase,
+    backfillDone,
+    userId,
+    weekStart,
+    calendarRefreshKey,
+  ]);
 
   const exportCSV = () => {
     const headers = [
@@ -1452,6 +1467,79 @@ export default function DashboardPage() {
       toast.error(err instanceof Error ? err.message : "Failed to uncancel class");
     } finally {
       setPendingCalendarSlotIds((prev) => prev.filter((id) => id !== slotId));
+    }
+  }
+
+  function openHolidayDialog(mode: "add" | "remove") {
+    if (!selectedCalendarDate) {
+      return;
+    }
+
+    if (mode === "add") {
+      setHolidayReason("Holiday");
+    }
+    setHolidayDialog(mode);
+  }
+
+  async function handleHolidayAction() {
+    if (!selectedCalendarDate || !activeSemester || !holidayDialog) {
+      return;
+    }
+
+    setIsHolidaySaving(true);
+
+    try {
+      if (holidayDialog === "add") {
+        const reason = holidayReason.trim() || "Holiday";
+        const slotIds = calendarClasses.map((item) => item.id);
+
+        const { error: holidayError } = await supabase.from("holidays").insert({
+          semester_id: activeSemester.id,
+          date: selectedCalendarDate,
+          reason,
+        });
+
+        if (holidayError) {
+          throw holidayError;
+        }
+
+        if (slotIds.length) {
+          const { error: attendanceError } = await supabase
+            .from("attendance_records")
+            .delete()
+            .in("slot_id", slotIds)
+            .eq("date", selectedCalendarDate);
+
+          if (attendanceError) {
+            throw attendanceError;
+          }
+        }
+
+        toast.success("Holiday added");
+      } else {
+        const { error: holidayError } = await supabase
+          .from("holidays")
+          .delete()
+          .eq("semester_id", activeSemester.id)
+          .eq("date", selectedCalendarDate);
+
+        if (holidayError) {
+          throw holidayError;
+        }
+
+        toast.success("Holiday removed");
+      }
+
+      setHolidayDialog(null);
+      setCalendarRefreshKey((current) => current + 1);
+    } catch (actionError) {
+      toast.error(
+        actionError instanceof Error
+          ? actionError.message
+          : `Failed to ${holidayDialog === "add" ? "add" : "remove"} holiday`
+      );
+    } finally {
+      setIsHolidaySaving(false);
     }
   }
 
@@ -2578,6 +2666,38 @@ export default function DashboardPage() {
                       </p>
                     </div>
 
+                    <div className="mb-4 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:flex-row sm:items-center sm:justify-between">
+                      {holidaySet.has(selectedCalendarDate) ? (
+                        <>
+                          <p className="text-sm text-red-600 dark:text-red-400">
+                            Holiday: {holidaySet.get(selectedCalendarDate)}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                            onClick={() => openHolidayDialog("remove")}
+                          >
+                            Remove holiday
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground">
+                            Mark this date as a holiday.
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                            onClick={() => openHolidayDialog("add")}
+                          >
+                            Add holiday
+                          </Button>
+                        </>
+                      )}
+                    </div>
+
                     {selectedCalendarClasses.length ? (
                       <div className="space-y-3">
                         {selectedCalendarClasses.map((item) => (
@@ -2789,6 +2909,69 @@ export default function DashboardPage() {
               }
             >
               Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={holidayDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !isHolidaySaving) {
+            setHolidayDialog(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {holidayDialog === "add" ? "Add holiday" : "Remove holiday"}
+            </DialogTitle>
+            <DialogDescription>
+              {holidayDialog === "add"
+                ? "Add a holiday for the selected date. Attendance records for this date will be removed."
+                : `Remove the holiday for ${
+                    selectedCalendarDate
+                      ? formatDisplayDate(
+                          new Date(`${selectedCalendarDate}T00:00:00`)
+                        )
+                      : "this date"
+                  }?`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {holidayDialog === "add" ? (
+            <div className="space-y-2">
+              <Label htmlFor="holiday-reason">Reason</Label>
+              <Input
+                id="holiday-reason"
+                value={holidayReason}
+                onChange={(event) => setHolidayReason(event.target.value)}
+                disabled={isHolidaySaving}
+                autoFocus
+              />
+            </div>
+          ) : null}
+
+          <DialogFooter className="max-sm:[&>button]:w-full sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setHolidayDialog(null)}
+              disabled={isHolidaySaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleHolidayAction()}
+              disabled={isHolidaySaving}
+            >
+              {isHolidaySaving
+                ? "Saving..."
+                : holidayDialog === "add"
+                  ? "Save"
+                  : "Remove holiday"}
             </Button>
           </DialogFooter>
         </DialogContent>
