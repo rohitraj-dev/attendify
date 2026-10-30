@@ -61,7 +61,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
-import type { AttendanceStatus } from "@/lib/types";
+import type { AttendanceStatus, Exam } from "@/lib/types";
 
 const THEME_STORAGE_KEY = "attendify-theme";
 
@@ -79,11 +79,13 @@ type SlotRow = {
   subject_code?: string;
   subjects:
     | {
+        id: string;
         name: string;
         code: string;
         semester_id?: string;
       }
     | {
+        id: string;
         name: string;
         code: string;
         semester_id?: string;
@@ -121,6 +123,10 @@ type DashboardClass = {
   status: "present" | "absent" | null;
   overrideType?: "cancelled" | "rescheduled";
   displayTime?: string;
+};
+
+type DashboardExam = Exam & {
+  subjectName?: string;
 };
 
 type SubjectStat = {
@@ -348,6 +354,17 @@ function getAttendanceStatusLabel(status: AttendanceStatus | null) {
   return "No record";
 }
 
+function examAffectsSubject(exam: Exam, subjectId: string) {
+  return exam.subject_id === null || exam.subject_id === subjectId;
+}
+
+function examAffectsSlot(exam: Exam, slot: CalendarClass | { subject_id: string }) {
+  return examAffectsSubject(
+    exam,
+    "subjectId" in slot ? slot.subjectId : slot.subject_id
+  );
+}
+
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function DashboardPage() {
@@ -356,6 +373,7 @@ export default function DashboardPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const hasAutoMarked = useRef(false);
   const [classes, setClasses] = useState<DashboardClass[]>([]);
+  const [todayExams, setTodayExams] = useState<DashboardExam[]>([]);
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [overrides, setOverrides] = useState<Record<string, DayOverride>>({});
@@ -380,6 +398,7 @@ export default function DashboardPage() {
   const [calendarOverrides, setCalendarOverrides] = useState<
     CalendarOverride[]
   >([]);
+  const [calendarExams, setCalendarExams] = useState<Exam[]>([]);
   const [calendarSubjectId, setCalendarSubjectId] = useState("all");
   const [calendarView, setCalendarView] = useState<"month" | "week">("month");
   const [weekStart, setWeekStart] = useState(() => {
@@ -401,6 +420,10 @@ export default function DashboardPage() {
   );
   const [holidayReason, setHolidayReason] = useState("Holiday");
   const [isHolidaySaving, setIsHolidaySaving] = useState(false);
+  const [examDialogOpen, setExamDialogOpen] = useState(false);
+  const [examTitle, setExamTitle] = useState("Exam");
+  const [examSubjectId, setExamSubjectId] = useState("all");
+  const [isExamSaving, setIsExamSaving] = useState(false);
   const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
   const [academicMonth, setAcademicMonth] = useState(() => {
     const d = new Date();
@@ -459,7 +482,8 @@ export default function DashboardPage() {
       overrideMap: Record<string, DayOverride>,
       activeSemester: ActiveSemester,
       statSlots: Array<{ id: string; subject_id: string; day_of_week: number }>,
-      holidayDates: Set<string>
+      holidayDates: Set<string>,
+      exams: Exam[]
     ) {
       if (hasAutoMarked.current) {
         return;
@@ -472,8 +496,18 @@ export default function DashboardPage() {
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const pastSlots = slots.filter((slot) => {
           const override = overrideMap[slot.id];
+          const subject = Array.isArray(slot.subjects)
+            ? slot.subjects[0]
+            : slot.subjects;
 
-          if (override?.type === "cancelled") {
+          if (
+            override?.type === "cancelled" ||
+            exams.some(
+              (exam) =>
+                exam.date === todayIso &&
+                (exam.subject_id === null || exam.subject_id === subject?.id)
+            )
+          ) {
             return false;
           }
 
@@ -555,15 +589,20 @@ export default function DashboardPage() {
           if (pastDates.length > 0) {
             const candidateBackfills: Array<{ slot_id: string; date: string }> = [];
             for (const { dateIso, dayOfWeek } of pastDates) {
-              if (holidayDates.has(dateIso)) {
-                continue;
-              }
-
               const matchingSlots = statSlots.filter(
                 (s) => s.day_of_week === dayOfWeek
               );
               for (const slot of matchingSlots) {
-                candidateBackfills.push({ slot_id: slot.id, date: dateIso });
+                if (
+                  !holidayDates.has(dateIso) &&
+                  !exams.some(
+                    (exam) =>
+                      exam.date === dateIso &&
+                      (exam.subject_id === null || exam.subject_id === slot.subject_id)
+                  )
+                ) {
+                  candidateBackfills.push({ slot_id: slot.id, date: dateIso });
+                }
               }
             }
 
@@ -618,7 +657,8 @@ export default function DashboardPage() {
 
     async function loadStats(
       activeSemester: ActiveSemester,
-      holidayDates: Set<string>
+      holidayDates: Set<string>,
+      exams: Exam[]
     ) {
       const { data: subjects, error: subjectsError } = await supabase
         .from("subjects")
@@ -683,7 +723,7 @@ export default function DashboardPage() {
 
       const { data: statAttendance, error: statAttendanceError } = await supabase
         .from("attendance_records")
-        .select("slot_id, status")
+        .select("slot_id, date, status")
         .in("slot_id", statSlotIds)
         .lte("date", todayIso)
         .neq("status", "cancelled");
@@ -705,7 +745,22 @@ export default function DashboardPage() {
         throw futureCancelledOverridesError;
       }
 
-      const allAttendance = (statAttendance as AttendanceRow[] | null) ?? [];
+      const examByDate = new Map<string, Exam[]>();
+      for (const exam of exams) {
+        const dateExams = examByDate.get(exam.date) ?? [];
+        dateExams.push(exam);
+        examByDate.set(exam.date, dateExams);
+      }
+      const slotSubjectIds = new Map(
+        typedStatSlots.map((slot) => [slot.id, slot.subject_id])
+      );
+      const allAttendance = ((statAttendance as (AttendanceRow & { date: string })[] | null) ?? [])
+        .filter(
+          (record) =>
+            !(examByDate.get(record.date) ?? []).some((exam) =>
+              examAffectsSubject(exam, slotSubjectIds.get(record.slot_id) ?? "")
+            )
+        );
       const slotsBySubject = new Map<
         string,
         Array<{ id: string; subject_id: string; day_of_week: number }>
@@ -760,6 +815,9 @@ export default function DashboardPage() {
               if (
                 slot.day_of_week === dayOfWeek &&
                 !holidayDates.has(isoDate) &&
+                !(examByDate.get(isoDate) ?? []).some((exam) =>
+                  examAffectsSubject(exam, subject.id)
+                ) &&
                 !cancelledOverrideSet.has(`${slot.id}:${isoDate}`)
               ) {
                 remainingClasses += 1;
@@ -868,10 +926,12 @@ export default function DashboardPage() {
         if (!semester) {
           setActiveSemester(null);
           setClasses([]);
+          setTodayExams([]);
           setSubjectStats([]);
           setAlerts([]);
           setOverrides({});
           setHolidays([]);
+          setCalendarExams([]);
           return;
         }
 
@@ -894,7 +954,32 @@ export default function DashboardPage() {
         const holidayDates = new Set(
           semesterHolidays.map((holiday) => holiday.date)
         );
-        const statSlots = await loadStats(semester, holidayDates);
+        const { data: subjectRows, error: subjectRowsError } = await supabase
+          .from("subjects")
+          .select("id, name")
+          .eq("semester_id", semester.id);
+
+        if (subjectRowsError) {
+          throw subjectRowsError;
+        }
+
+        const subjectNameById = new Map(
+          ((subjectRows ?? []) as Array<{ id: string; name: string }>).map(
+            (subject) => [subject.id, subject.name]
+          )
+        );
+        const { data: examRows, error: examsError } = await supabase
+          .from("exams")
+          .select("id, semester_id, subject_id, date, title, created_at")
+          .eq("semester_id", semester.id)
+          .order("date", { ascending: true });
+
+        if (examsError) {
+          throw examsError;
+        }
+
+        const semesterExams = (examRows ?? []) as Exam[];
+        const statSlots = await loadStats(semester, holidayDates, semesterExams);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -914,6 +999,17 @@ export default function DashboardPage() {
             : slot.subjects;
           return Boolean(subject && subject.semester_id === semester.id);
         });
+
+        const todayExamRows = semesterExams.filter((exam) => exam.date === todayIso);
+        setTodayExams(
+          todayExamRows.map((exam) => ({
+            ...exam,
+            subjectName:
+              exam.subject_id
+                ? subjectNameById.get(exam.subject_id)
+                : undefined,
+          }))
+        );
 
         if (!typedSlots.length) {
           setClasses([]);
@@ -946,9 +1042,10 @@ export default function DashboardPage() {
           overrideMap,
           semester,
           statSlots ?? [],
-          holidayDates
+          holidayDates,
+          semesterExams
         );
-        await loadStats(semester, holidayDates);
+        await loadStats(semester, holidayDates, semesterExams);
 
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
@@ -968,7 +1065,18 @@ export default function DashboardPage() {
         );
 
         setClasses(
-          typedSlots.map((slot) => {
+          typedSlots
+            .filter((slot) => {
+              const subject = Array.isArray(slot.subjects)
+                ? slot.subjects[0]
+                : slot.subjects;
+              return !todayExamRows.some(
+                (exam) =>
+                  exam.date === todayIso &&
+                  (exam.subject_id === null || exam.subject_id === subject?.id)
+              );
+            })
+            .map((slot) => {
             const subject = Array.isArray(slot.subjects)
               ? slot.subjects[0]
               : slot.subjects;
@@ -995,7 +1103,7 @@ export default function DashboardPage() {
                   ? formatTimeRange(override.new_time, slot.end_time)
                   : undefined,
             };
-          })
+            })
         );
       } catch (loadError) {
         console.error("Failed to load dashboard:", loadError);
@@ -1018,6 +1126,7 @@ export default function DashboardPage() {
         setCalendarClasses([]);
         setCalendarAttendance([]);
         setCalendarOverrides([]);
+        setCalendarExams([]);
         setCalendarError(null);
         setIsCalendarLoading(false);
         return;
@@ -1069,12 +1178,6 @@ export default function DashboardPage() {
 
         const slotIds = typedSlots.map((slot) => slot.id);
 
-        if (!slotIds.length) {
-          setCalendarAttendance([]);
-          setCalendarOverrides([]);
-          return;
-        }
-
         const monthStartIso = formatLocalDateIso(
           new Date(displayedMonth.getFullYear(), displayedMonth.getMonth(), 1)
         );
@@ -1087,6 +1190,25 @@ export default function DashboardPage() {
         const weekEndIso = formatLocalDateIso(weekEnd);
         const rangeStartIso = monthStartIso < weekStartIso ? monthStartIso : weekStartIso;
         const rangeEndIso = monthEndIso > weekEndIso ? monthEndIso : weekEndIso;
+
+        const { data: examRows, error: examsError } = await supabase
+          .from("exams")
+          .select("id, semester_id, subject_id, date, title, created_at")
+          .eq("semester_id", activeSemester.id)
+          .gte("date", rangeStartIso)
+          .lte("date", rangeEndIso);
+
+        if (examsError) {
+          throw examsError;
+        }
+
+        setCalendarExams((examRows ?? []) as Exam[]);
+
+        if (!slotIds.length) {
+          setCalendarAttendance([]);
+          setCalendarOverrides([]);
+          return;
+        }
 
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
@@ -1543,6 +1665,95 @@ export default function DashboardPage() {
     }
   }
 
+  function openExamDialog() {
+    if (!selectedCalendarDate) {
+      return;
+    }
+
+    setExamTitle("Exam");
+    setExamSubjectId("all");
+    setExamDialogOpen(true);
+  }
+
+  async function handleAddExam() {
+    if (!selectedCalendarDate || !activeSemester) {
+      return;
+    }
+
+    setIsExamSaving(true);
+
+    try {
+      const { data: exam, error: examError } = await supabase
+        .from("exams")
+        .insert({
+          semester_id: activeSemester.id,
+          date: selectedCalendarDate,
+          subject_id: examSubjectId === "all" ? null : examSubjectId,
+          title: examTitle.trim() || "Exam",
+        })
+        .select("id, semester_id, subject_id, date, title, created_at")
+        .single();
+
+      if (examError) {
+        throw examError;
+      }
+
+      const affectedSlotIds = calendarClasses
+        .filter((item) => examAffectsSlot(exam as Exam, item))
+        .map((item) => item.id);
+
+      if (affectedSlotIds.length) {
+        const { error: attendanceError } = await supabase
+          .from("attendance_records")
+          .delete()
+          .in("slot_id", affectedSlotIds)
+          .eq("date", selectedCalendarDate);
+
+        if (attendanceError) {
+          throw attendanceError;
+        }
+      }
+
+      setExamDialogOpen(false);
+      setExamTitle("Exam");
+      setExamSubjectId("all");
+      toast.success("Exam added");
+      setCalendarRefreshKey((current) => current + 1);
+    } catch (actionError) {
+      toast.error(
+        actionError instanceof Error ? actionError.message : "Failed to add exam"
+      );
+    } finally {
+      setIsExamSaving(false);
+    }
+  }
+
+  async function handleRemoveExam(exam: Exam) {
+    if (!window.confirm(`Remove "${exam.title}"?`)) {
+      return;
+    }
+
+    try {
+      const { error: examError } = await supabase
+        .from("exams")
+        .delete()
+        .eq("id", exam.id);
+
+      if (examError) {
+        throw examError;
+      }
+
+      toast.success("Exam removed");
+      setCalendarRefreshKey((current) => current + 1);
+    } catch (actionError) {
+      toast.error(
+        actionError instanceof Error
+          ? actionError.message
+          : "Failed to remove exam"
+      );
+    }
+  }
+
   async function handleCancelClass(slotId: string) {
     const targetClass = classes.find((item) => item.id === slotId);
 
@@ -1733,6 +1944,18 @@ export default function DashboardPage() {
   });
   const academicDays = buildCalendarDays(academicMonth);
   const holidaySet = new Map<string, string>(holidays.map((h) => [h.date, h.reason]));
+  const filteredCalendarExams = calendarExams.filter(
+    (exam) =>
+      calendarSubjectId === "all" ||
+      exam.subject_id === null ||
+      exam.subject_id === calendarSubjectId
+  );
+  const examsByDate = new Map<string, Exam[]>();
+  for (const exam of filteredCalendarExams) {
+    const dateExams = examsByDate.get(exam.date) ?? [];
+    dateExams.push(exam);
+    examsByDate.set(exam.date, dateExams);
+  }
   const selectedAcademicHoliday = selectedAcademicDate ? holidaySet.get(selectedAcademicDate) : null;
   const isSemesterDay = (dateIso: string) => {
     if (!activeSemester) return false;
@@ -1776,7 +1999,10 @@ export default function DashboardPage() {
         .filter(
           (item) =>
             item.dayOfWeek === selectedCalendarDateObject.getDay() &&
-            filteredCalendarSlotIds.has(item.id)
+            filteredCalendarSlotIds.has(item.id) &&
+            !(examsByDate.get(selectedCalendarDate!) ?? []).some((exam) =>
+              examAffectsSlot(exam, item)
+            )
         )
         .map((item) => {
           const override = overrideBySlotDate.get(
@@ -2088,8 +2314,28 @@ export default function DashboardPage() {
                   </Card>
                 ))}
               </div>
-            ) : classes.length ? (
+            ) : todayExams.length || classes.length ? (
               <div className="grid gap-4">
+                {todayExams.map((exam) => (
+                  <Card key={exam.id} className="border-purple-200 dark:border-purple-950">
+                    <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <CardTitle>{exam.title}</CardTitle>
+                        <CardDescription>
+                          {exam.subjectName ?? "All subjects"}
+                        </CardDescription>
+                      </div>
+                      <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-200">
+                        Exam
+                      </Badge>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">
+                        Classes affected by this exam are excluded from attendance.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
                 {classes.map((slot) => {
                   const isPending = pendingSlotIds.includes(slot.id);
 
@@ -2548,6 +2794,12 @@ export default function DashboardPage() {
                           {day.getDate()}
                         </span>
                         <div className="mt-3 flex flex-wrap gap-1 max-sm:mt-1 max-sm:justify-center max-sm:gap-0.5">
+                          {examsByDate.has(dateKey) ? (
+                            <span
+                              className="h-2.5 w-2.5 rounded-full bg-purple-500 max-sm:h-1.5 max-sm:w-1.5"
+                              title="Exam"
+                            />
+                          ) : null}
                           {dayRecords.slice(0, 4).map((record, index) => (
                             <span
                               key={`${record.slot_id}-${record.status}-${index}`}
@@ -2565,7 +2817,11 @@ export default function DashboardPage() {
                   <div className="grid gap-3 sm:grid-cols-5">
                     {weekDays.map((day) => {
                       const dateKey = formatLocalDateIso(day);
-                      const dayClasses = weekClassByDate.get(dateKey) ?? [];
+                      const dayExams = examsByDate.get(dateKey) ?? [];
+                      const dayClasses = (weekClassByDate.get(dateKey) ?? []).filter(
+                        ({ item }) =>
+                          !dayExams.some((exam) => examAffectsSlot(exam, item))
+                      );
                       const holidayReason = holidaySet.get(dateKey);
                       const isToday = dateKey === localTodayIso;
 
@@ -2598,8 +2854,33 @@ export default function DashboardPage() {
                             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-950 dark:bg-amber-950/30 dark:text-amber-200">
                               Holiday: {holidayReason}
                             </p>
-                          ) : dayClasses.length ? (
+                          ) : (
                             <div className="space-y-2">
+                              {dayExams.map((exam) => (
+                                <button
+                                  key={`${dateKey}-exam-${exam.id}`}
+                                  type="button"
+                                  className="flex min-h-11 w-full items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-left transition hover:shadow-sm dark:border-purple-950 dark:bg-purple-950/30"
+                                  onClick={() => setSelectedCalendarDate(dateKey)}
+                                >
+                                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-purple-500" />
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-medium">
+                                      {exam.title}
+                                    </span>
+                                    <span className="block text-[11px] font-medium text-purple-700 dark:text-purple-300">
+                                      Exam
+                                      {exam.subject_id
+                                        ? ` · ${
+                                            subjectStats.find(
+                                              (subject) => subject.id === exam.subject_id
+                                            )?.name ?? "Subject"
+                                          }`
+                                        : " · All subjects"}
+                                    </span>
+                                  </span>
+                                </button>
+                              ))}
                               {dayClasses.map(({ item, status, timeRange }) => (
                                 <button
                                   key={`${dateKey}-${item.id}`}
@@ -2617,7 +2898,7 @@ export default function DashboardPage() {
                                           ? "bg-red-500"
                                           : status === "cancelled"
                                             ? "bg-zinc-400"
-                                                : "bg-zinc-300"
+                                            : "bg-zinc-300"
                                     }`}
                                   />
                                   <span className="min-w-0">
@@ -2633,11 +2914,12 @@ export default function DashboardPage() {
                                   </span>
                                 </button>
                               ))}
+                              {!dayExams.length && !dayClasses.length ? (
+                                <p className="px-1 py-3 text-xs text-muted-foreground">
+                                  No classes
+                                </p>
+                              ) : null}
                             </div>
-                          ) : (
-                            <p className="px-1 py-3 text-xs text-muted-foreground">
-                              No classes
-                            </p>
                           )}
                         </div>
                       );
@@ -2664,6 +2946,62 @@ export default function DashboardPage() {
                           ? "Classes and attendance status"
                           : "No classes scheduled for this day"}
                       </p>
+                    </div>
+
+                    <div className="mb-4 space-y-3 rounded-xl border border-purple-200 bg-purple-50/60 px-4 py-3 dark:border-purple-950 dark:bg-purple-950/20">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-purple-900 dark:text-purple-100">
+                            Exams
+                          </p>
+                          <p className="text-xs text-purple-700 dark:text-purple-300">
+                            Exams replace affected classes and attendance records.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-11 w-full border-purple-300 bg-background sm:min-h-8 sm:w-auto"
+                          onClick={openExamDialog}
+                        >
+                          Add exam
+                        </Button>
+                      </div>
+                      {(examsByDate.get(selectedCalendarDate) ?? []).length ? (
+                        <div className="space-y-2">
+                          {(examsByDate.get(selectedCalendarDate) ?? []).map((exam) => (
+                            <div
+                              key={exam.id}
+                              className="flex flex-col gap-2 rounded-lg border border-purple-200 bg-background px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-purple-900"
+                            >
+                              <div className="min-w-0">
+                                <p className="break-words text-sm font-medium">
+                                  {exam.title}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {exam.subject_id
+                                    ? subjectStats.find(
+                                        (subject) => subject.id === exam.subject_id
+                                      )?.name ?? "Subject"
+                                    : "All subjects"}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="min-h-11 w-full text-destructive sm:min-h-8 sm:w-auto"
+                                onClick={() => void handleRemoveExam(exam)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          No exams scheduled for this day.
+                        </p>
+                      )}
                     </div>
 
                     <div className="mb-4 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:flex-row sm:items-center sm:justify-between">
@@ -2972,6 +3310,77 @@ export default function DashboardPage() {
                 : holidayDialog === "add"
                   ? "Save"
                   : "Remove holiday"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={examDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !isExamSaving) {
+            setExamDialogOpen(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add exam</DialogTitle>
+            <DialogDescription>
+              Add an exam for{" "}
+              {selectedCalendarDate
+                ? formatDisplayDate(new Date(`${selectedCalendarDate}T00:00:00`))
+                : "the selected date"}
+              .
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="exam-title">Title</Label>
+              <Input
+                id="exam-title"
+                value={examTitle}
+                onChange={(event) => setExamTitle(event.target.value)}
+                disabled={isExamSaving}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="exam-subject">Subject</Label>
+              <Select
+                value={examSubjectId}
+                onValueChange={setExamSubjectId}
+                disabled={isExamSaving}
+              >
+                <SelectTrigger id="exam-subject" className="w-full">
+                  <SelectValue placeholder="All subjects" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All subjects</SelectItem>
+                  {subjectStats.map((subject) => (
+                    <SelectItem key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="max-sm:[&>button]:w-full sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setExamDialogOpen(false)}
+              disabled={isExamSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleAddExam()}
+              disabled={isExamSaving}
+            >
+              {isExamSaving ? "Saving..." : "Save exam"}
             </Button>
           </DialogFooter>
         </DialogContent>
