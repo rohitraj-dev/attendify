@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, Moon, Sun } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CalendarDays, Loader2, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +17,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -47,6 +56,8 @@ type ParsedSlot = {
   checked: boolean;
 };
 
+type DangerAction = "semester" | "all" | "account";
+
 const TOTAL_STEPS = 5;
 
 const stepLabels = [
@@ -71,6 +82,7 @@ const THEME_STORAGE_KEY = "attendify-theme";
 
 export default function SetupPage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
+  const router = useRouter();
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -80,6 +92,9 @@ export default function SetupPage() {
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isLoadingPresetHolidays, setIsLoadingPresetHolidays] = useState(false);
   const [holidayRefreshKey, setHolidayRefreshKey] = useState(0);
+  const [dangerAction, setDangerAction] = useState<DangerAction | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [semesterName, setSemesterName] = useState("");
   const [semesterStartDate, setSemesterStartDate] = useState("");
@@ -94,6 +109,31 @@ export default function SetupPage() {
   const [parsedSlots, setParsedSlots] = useState<ParsedSlot[]>([]);
 
   const progressValue = (currentStep / TOTAL_STEPS) * 100;
+  const isDeleteConfirmed = deleteConfirmation === "DELETE";
+
+  const dangerActionDetails: Record<
+    DangerAction,
+    { title: string; description: string; confirmLabel: string }
+  > = {
+    semester: {
+      title: "Reset this semester?",
+      description:
+        "This permanently deletes the active semester, including its subjects, timetable, holidays, overrides, and attendance records.",
+      confirmLabel: "Reset semester",
+    },
+    all: {
+      title: "Reset all data?",
+      description:
+        "This permanently deletes all of your semesters and every piece of attendance data associated with them.",
+      confirmLabel: "Reset all data",
+    },
+    account: {
+      title: "Delete your account?",
+      description:
+        "This permanently deletes your account and all of your Attendify data. You will be signed out.",
+      confirmLabel: "Delete account",
+    },
+  };
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -128,6 +168,96 @@ export default function SetupPage() {
 
       return next;
     });
+  }
+
+  function openDangerDialog(action: DangerAction) {
+    setDeleteConfirmation("");
+    setDangerAction(action);
+  }
+
+  function closeDangerDialog() {
+    if (!isDeleting) {
+      setDangerAction(null);
+      setDeleteConfirmation("");
+    }
+  }
+
+  async function handleDangerAction() {
+    if (!dangerAction || !isDeleteConfirmed) {
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      if (dangerAction === "account") {
+        const response = await fetch("/api/delete-account", { method: "POST" });
+        const payload = (await response.json()) as {
+          success: boolean;
+          error?: string;
+        };
+
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error ?? "Failed to delete account");
+        }
+
+        await supabase.auth.signOut();
+        toast.success("Account deleted");
+        router.replace("/");
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        throw new Error("Not logged in");
+      }
+
+      let deleteQuery = supabase.from("semesters").delete().eq("user_id", user.id);
+
+      if (dangerAction === "semester") {
+        const semesterId =
+          savedSemester?.id ??
+          (
+            await supabase
+              .from("semesters")
+              .select("id")
+              .eq("user_id", user.id)
+              .eq("is_active", true)
+              .maybeSingle()
+          ).data?.id;
+
+        if (!semesterId) {
+          throw new Error("No active semester found");
+        }
+
+        deleteQuery = deleteQuery.eq("id", semesterId);
+      }
+
+      const { error } = await deleteQuery;
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success(
+        dangerAction === "semester"
+          ? "Semester reset"
+          : "All data reset"
+      );
+      router.replace("/setup");
+      router.refresh();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to complete reset"
+      );
+    } finally {
+      setIsDeleting(false);
+      setDangerAction(null);
+      setDeleteConfirmation("");
+    }
   }
 
   async function handleSemesterSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -855,7 +985,99 @@ export default function SetupPage() {
             </CardFooter>
           </Card>
         )}
+
+        <Card className="border-red-200 dark:border-red-900/70">
+          <CardHeader>
+            <CardTitle className="text-red-700 dark:text-red-400">
+              Danger zone
+            </CardTitle>
+            <CardDescription>
+              Destructive actions permanently remove attendance data and cannot be undone.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={() => openDangerDialog("semester")}
+            >
+              Reset this semester
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={() => openDangerDialog("all")}
+            >
+              Reset all data
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={() => openDangerDialog("account")}
+            >
+              Delete account
+            </Button>
+          </CardContent>
+        </Card>
       </div>
+
+      <Dialog
+        open={dangerAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeDangerDialog();
+          }
+        }}
+      >
+        <DialogContent>
+          {dangerAction ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{dangerActionDetails[dangerAction].title}</DialogTitle>
+                <DialogDescription>
+                  {dangerActionDetails[dangerAction].description} Type{" "}
+                  <strong>DELETE</strong> below to continue.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="delete-confirmation">Confirmation</Label>
+                <Input
+                  id="delete-confirmation"
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  placeholder="DELETE"
+                  autoComplete="off"
+                  disabled={isDeleting}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={closeDangerDialog}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void handleDangerAction()}
+                  disabled={!isDeleteConfirmed || isDeleting}
+                >
+                  {isDeleting ? <Loader2 className="animate-spin" /> : null}
+                  {isDeleting
+                    ? "Deleting..."
+                    : dangerActionDetails[dangerAction].confirmLabel}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
