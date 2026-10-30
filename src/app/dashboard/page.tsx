@@ -44,6 +44,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -139,11 +146,13 @@ type CalendarSlotRow = {
   subject_code?: string;
   subjects:
     | {
+        id: string;
         name: string;
         code: string;
         semester_id?: string;
       }
     | {
+        id: string;
         name: string;
         code: string;
         semester_id?: string;
@@ -153,6 +162,7 @@ type CalendarSlotRow = {
 
 type CalendarClass = {
   id: string;
+  subjectId: string;
   dayOfWeek: number;
   subjectName: string;
   subjectCode: string;
@@ -332,6 +342,7 @@ export default function DashboardPage() {
   const [calendarAttendance, setCalendarAttendance] = useState<
     CalendarAttendanceRow[]
   >([]);
+  const [calendarSubjectId, setCalendarSubjectId] = useState("all");
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(
     null
   );
@@ -964,7 +975,7 @@ export default function DashboardPage() {
       try {
         const { data: slotRows, error: slotError } = await supabase
           .from("schedule_slots")
-          .select("id, day_of_week, start_time, end_time, subjects(name, code, semester_id)")
+          .select("id, day_of_week, start_time, end_time, subjects(id, name, code, semester_id)")
           .order("day_of_week", { ascending: true })
           .order("start_time", { ascending: true });
 
@@ -989,6 +1000,7 @@ export default function DashboardPage() {
 
             return {
               id: slot.id,
+              subjectId: subject?.id ?? "",
               dayOfWeek: slot.day_of_week,
               subjectName:
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1549,22 +1561,41 @@ export default function DashboardPage() {
     if (!activeSemester) return false;
     return dateIso >= activeSemester.start_date && (!activeSemester.end_date || dateIso <= activeSemester.end_date);
   };
-  const attendanceByDate = new Map<string, CalendarAttendanceRow[]>();
   const attendanceBySlotDate = new Map<string, AttendanceStatus>();
 
   for (const record of calendarAttendance) {
-    const currentRecords = attendanceByDate.get(record.date) ?? [];
-    currentRecords.push(record);
-    attendanceByDate.set(record.date, currentRecords);
     attendanceBySlotDate.set(`${record.date}:${record.slot_id}`, record.status);
   }
 
   const selectedCalendarDateObject = selectedCalendarDate
     ? new Date(`${selectedCalendarDate}T00:00:00`)
     : null;
+  const filteredCalendarClasses =
+    calendarSubjectId === "all"
+      ? calendarClasses
+      : calendarClasses.filter((item) => item.subjectId === calendarSubjectId);
+  const filteredCalendarSlotIds = new Set(
+    filteredCalendarClasses.map((item) => item.id)
+  );
+  const filteredAttendanceByDate = new Map<string, CalendarAttendanceRow[]>();
+
+  for (const record of calendarAttendance) {
+    if (!filteredCalendarSlotIds.has(record.slot_id)) {
+      continue;
+    }
+
+    const currentRecords = filteredAttendanceByDate.get(record.date) ?? [];
+    currentRecords.push(record);
+    filteredAttendanceByDate.set(record.date, currentRecords);
+  }
+
   const selectedCalendarClasses = selectedCalendarDateObject
     ? calendarClasses
-        .filter((item) => item.dayOfWeek === selectedCalendarDateObject.getDay())
+        .filter(
+          (item) =>
+            item.dayOfWeek === selectedCalendarDateObject.getDay() &&
+            filteredCalendarSlotIds.has(item.id)
+        )
         .map((item) => ({
           ...item,
           status:
@@ -2080,6 +2111,52 @@ export default function DashboardPage() {
                   <p className="text-sm text-red-600">{calendarError}</p>
                 ) : null}
 
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Select
+                    value={calendarSubjectId}
+                    onValueChange={(value) => {
+                      setCalendarSubjectId(value);
+                      setSelectedCalendarDate(null);
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-[220px]" aria-label="Filter calendar by subject">
+                      <SelectValue placeholder="All subjects" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All subjects</SelectItem>
+                      {subjectStats.map((subject) => (
+                        <SelectItem key={subject.id} value={subject.id}>
+                          {subject.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {calendarSubjectId !== "all" ? (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span>
+                        Showing:{" "}
+                        {subjectStats.find(
+                          (subject) => subject.id === calendarSubjectId
+                        )?.name ?? "Selected subject"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-7"
+                        aria-label="Clear subject filter"
+                        onClick={() => {
+                          setCalendarSubjectId("all");
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        <X />
+                        <span className="sr-only">Clear subject filter</span>
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="grid grid-cols-7 gap-2 max-sm:gap-0.5">
                   {WEEKDAY_LABELS.map((label) => (
                     <div
@@ -2094,7 +2171,7 @@ export default function DashboardPage() {
                     const isCurrentMonth =
                       day.getMonth() === displayedMonth.getMonth() &&
                       day.getFullYear() === displayedMonth.getFullYear();
-                    const dayRecords = attendanceByDate.get(dateKey) ?? [];
+                    const dayRecords = filteredAttendanceByDate.get(dateKey) ?? [];
                     const isSelected = selectedCalendarDate === dateKey;
                     const isToday = dateKey === localTodayIso;
 
