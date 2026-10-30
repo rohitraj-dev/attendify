@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -401,6 +402,7 @@ export default function DashboardPage() {
   const [calendarExams, setCalendarExams] = useState<Exam[]>([]);
   const [calendarSubjectId, setCalendarSubjectId] = useState("all");
   const [calendarView, setCalendarView] = useState<"month" | "week">("month");
+  const [isCalendarLegendOpen, setIsCalendarLegendOpen] = useState(false);
   const [selectDaysMode, setSelectDaysMode] = useState(false);
   const [selectedBulkDates, setSelectedBulkDates] = useState<Set<string>>(
     new Set()
@@ -3072,6 +3074,49 @@ export default function DashboardPage() {
                     })}
                   </div>
                 )}
+
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="min-h-11 w-full justify-between px-1 sm:hidden"
+                    aria-expanded={isCalendarLegendOpen}
+                    onClick={() =>
+                      setIsCalendarLegendOpen((current) => !current)
+                    }
+                  >
+                    <span className="text-sm font-medium">Legend</span>
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        isCalendarLegendOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </Button>
+                  <div
+                    className={`grid-cols-2 gap-x-4 gap-y-2 sm:flex sm:flex-wrap sm:gap-x-5 sm:gap-y-2 ${
+                      isCalendarLegendOpen ? "grid" : "hidden sm:flex"
+                    }`}
+                  >
+                    {[
+                      ["Present", "bg-emerald-500"],
+                      ["Absent", "bg-red-500"],
+                      ["Cancelled", "bg-zinc-400"],
+                      ["Holiday", "bg-amber-500"],
+                      ["Exam", "bg-purple-500"],
+                      ["Upcoming", "bg-zinc-300"],
+                    ].map(([label, dotClass]) => (
+                      <div
+                        key={label}
+                        className="flex items-center gap-2 text-xs text-muted-foreground"
+                      >
+                        <span
+                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`}
+                        />
+                        <span>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 {calendarView === "month" && selectDaysMode && selectedBulkDates.size ? (
                   <div className="sticky bottom-4 z-20 -mx-4 mt-4 border-t border-border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:bottom-4 sm:rounded-xl sm:border sm:shadow-md">
