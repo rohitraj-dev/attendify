@@ -401,6 +401,14 @@ export default function DashboardPage() {
   const [calendarExams, setCalendarExams] = useState<Exam[]>([]);
   const [calendarSubjectId, setCalendarSubjectId] = useState("all");
   const [calendarView, setCalendarView] = useState<"month" | "week">("month");
+  const [selectDaysMode, setSelectDaysMode] = useState(false);
+  const [selectedBulkDates, setSelectedBulkDates] = useState<Set<string>>(
+    new Set()
+  );
+  const [bulkConfirmAction, setBulkConfirmAction] = useState<
+    "present" | "absent" | null
+  >(null);
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
   const [weekStart, setWeekStart] = useState(() => {
     const date = new Date();
     const day = date.getDay();
@@ -1930,6 +1938,91 @@ export default function DashboardPage() {
     }
   }
 
+  function toggleBulkDate(dateKey: string) {
+    if (!selectableBulkDates.has(dateKey)) {
+      return;
+    }
+
+    setSelectedBulkDates((current) => {
+      const next = new Set(current);
+      if (next.has(dateKey)) {
+        next.delete(dateKey);
+      } else {
+        next.add(dateKey);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkAttendance() {
+    if (!bulkConfirmAction || !selectedBulkDates.size) {
+      return;
+    }
+
+    setIsBulkSaving(true);
+
+    try {
+      const records: Array<{
+        slot_id: string;
+        date: string;
+        status: "present" | "absent";
+        marked_by: "manual";
+      }> = [];
+
+      for (const date of selectedBulkDates) {
+        const dayOfWeek = new Date(`${date}T00:00:00`).getDay();
+        const dayExams = examsByDate.get(date) ?? [];
+
+        for (const slot of filteredCalendarClasses) {
+          if (
+            slot.dayOfWeek !== dayOfWeek ||
+            calendarOverrides.some(
+              (override) =>
+                override.slot_id === slot.id &&
+                override.date === date &&
+                override.type === "cancelled"
+            ) ||
+            dayExams.some((exam) => examAffectsSlot(exam, slot))
+          ) {
+            continue;
+          }
+
+          records.push({
+            slot_id: slot.id,
+            date,
+            status: bulkConfirmAction,
+            marked_by: "manual",
+          });
+        }
+      }
+
+      if (records.length) {
+        const { error: attendanceError } = await supabase
+          .from("attendance_records")
+          .upsert(records, { onConflict: "slot_id,date" });
+
+        if (attendanceError) {
+          throw attendanceError;
+        }
+      }
+
+      const statusLabel = bulkConfirmAction === "absent" ? "absent" : "present";
+      setSelectedBulkDates(new Set());
+      setSelectDaysMode(false);
+      setBulkConfirmAction(null);
+      setCalendarRefreshKey((current) => current + 1);
+      toast.success(`Marked ${records.length} classes ${statusLabel}`);
+    } catch (actionError) {
+      toast.error(
+        actionError instanceof Error
+          ? actionError.message
+          : "Failed to update attendance"
+      );
+    } finally {
+      setIsBulkSaving(false);
+    }
+  }
+
   const selectedRescheduleClass = classes.find(
     (item) => item.id === rescheduleSlotId
   );
@@ -1976,6 +2069,25 @@ export default function DashboardPage() {
       : calendarClasses.filter((item) => item.subjectId === calendarSubjectId);
   const filteredCalendarSlotIds = new Set(
     filteredCalendarClasses.map((item) => item.id)
+  );
+  const selectableBulkDates = new Set(
+    calendarDays
+      .map((day) => formatLocalDateIso(day))
+      .filter((dateKey) => {
+        const date = new Date(`${dateKey}T00:00:00`);
+        return (
+          date.getMonth() === displayedMonth.getMonth() &&
+          date.getFullYear() === displayedMonth.getFullYear() &&
+          dateKey <= localTodayIso &&
+          date.getDay() !== 0 &&
+          date.getDay() !== 6 &&
+          !holidaySet.has(dateKey) &&
+          !examsByDate.has(dateKey) &&
+          filteredCalendarClasses.some(
+            (item) => item.dayOfWeek === date.getDay()
+          )
+        );
+      })
   );
   const filteredAttendanceByDate = new Map<string, CalendarAttendanceRow[]>();
   const overrideBySlotDate = new Map<string, CalendarOverride>();
@@ -2595,6 +2707,7 @@ export default function DashboardPage() {
                             )
                           );
                           setSelectedCalendarDate(null);
+                          setSelectedBulkDates(new Set());
                         }}
                       >
                         <ChevronLeft />
@@ -2614,6 +2727,7 @@ export default function DashboardPage() {
                             )
                           );
                           setSelectedCalendarDate(null);
+                          setSelectedBulkDates(new Set());
                         }}
                       >
                         <ChevronRight />
@@ -2696,11 +2810,27 @@ export default function DashboardPage() {
                     className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
                     onClick={() => {
                       setCalendarView("week");
+                      setSelectDaysMode(false);
+                      setSelectedBulkDates(new Set());
                       setSelectedCalendarDate(null);
                     }}
                   >
                     Week
                   </Button>
+                  {calendarView === "month" ? (
+                    <Button
+                      type="button"
+                      variant={selectDaysMode ? "secondary" : "ghost"}
+                      className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
+                      onClick={() => {
+                        setSelectDaysMode((current) => !current);
+                        setSelectedBulkDates(new Set());
+                        setSelectedCalendarDate(null);
+                      }}
+                    >
+                      Select days
+                    </Button>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2709,6 +2839,7 @@ export default function DashboardPage() {
                     onValueChange={(value) => {
                       setCalendarSubjectId(value);
                       setSelectedCalendarDate(null);
+                      setSelectedBulkDates(new Set());
                     }}
                   >
                     <SelectTrigger className="w-full sm:w-[220px]" aria-label="Filter calendar by subject">
@@ -2766,16 +2897,26 @@ export default function DashboardPage() {
                       day.getFullYear() === displayedMonth.getFullYear();
                     const dayRecords = filteredAttendanceByDate.get(dateKey) ?? [];
                     const isSelected = selectedCalendarDate === dateKey;
+                    const isBulkSelected = selectedBulkDates.has(dateKey);
                     const isToday = dateKey === localTodayIso;
 
                     return (
                       <button
                         key={dateKey}
                         type="button"
-                        disabled={!isCurrentMonth}
-                        onClick={() => setSelectedCalendarDate(dateKey)}
+                        disabled={
+                          !isCurrentMonth ||
+                          (selectDaysMode && !selectableBulkDates.has(dateKey))
+                        }
+                        onClick={() =>
+                          selectDaysMode
+                            ? toggleBulkDate(dateKey)
+                            : setSelectedCalendarDate(dateKey)
+                        }
                         className={`rounded-xl border p-2 text-left transition max-sm:aspect-square max-sm:p-1 ${
-                          isSelected ? "ring-2 ring-zinc-900/10 max-sm:bg-zinc-100 dark:max-sm:bg-zinc-800" : ""
+                          isSelected || isBulkSelected
+                            ? "ring-2 ring-zinc-900/10 max-sm:bg-zinc-100 dark:max-sm:bg-zinc-800"
+                            : ""
                         } ${
                           isCurrentMonth
                             ? "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
@@ -2809,6 +2950,11 @@ export default function DashboardPage() {
                             />
                           ))}
                         </div>
+                        {selectDaysMode && isBulkSelected ? (
+                          <span className="mt-1 block text-[10px] font-semibold text-zinc-700 dark:text-zinc-300">
+                            Selected
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}
@@ -2926,6 +3072,45 @@ export default function DashboardPage() {
                     })}
                   </div>
                 )}
+
+                {calendarView === "month" && selectDaysMode && selectedBulkDates.size ? (
+                  <div className="sticky bottom-4 z-20 -mx-4 mt-4 border-t border-border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:bottom-4 sm:rounded-xl sm:border sm:shadow-md">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm font-medium">
+                        {selectedBulkDates.size} day
+                        {selectedBulkDates.size === 1 ? "" : "s"} selected
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                        <Button
+                          type="button"
+                          className="min-h-11 sm:min-h-8"
+                          onClick={() => setBulkConfirmAction("absent")}
+                        >
+                          Mark absent
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-11 sm:min-h-8"
+                          onClick={() => setBulkConfirmAction("present")}
+                        >
+                          Mark present
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="col-span-2 min-h-11 sm:min-h-8 sm:w-auto"
+                          onClick={() => {
+                            setSelectedBulkDates(new Set());
+                            setSelectDaysMode(false);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {isCalendarLoading ? (
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 dark:border-zinc-800 dark:bg-zinc-900">
@@ -3381,6 +3566,46 @@ export default function DashboardPage() {
               disabled={isExamSaving}
             >
               {isExamSaving ? "Saving..." : "Save exam"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={bulkConfirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open && !isBulkSaving) {
+            setBulkConfirmAction(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Mark {selectedBulkDates.size} day
+              {selectedBulkDates.size === 1 ? "" : "s"}{" "}
+              {bulkConfirmAction === "absent" ? "absent" : "present"}?
+            </DialogTitle>
+            <DialogDescription>
+              This will overwrite existing attendance records for eligible
+              classes on the selected days. Cancelled classes will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="max-sm:[&>button]:w-full sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBulkConfirmAction(null)}
+              disabled={isBulkSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleBulkAttendance()}
+              disabled={isBulkSaving}
+            >
+              {isBulkSaving ? "Saving..." : "Confirm"}
             </Button>
           </DialogFooter>
         </DialogContent>
