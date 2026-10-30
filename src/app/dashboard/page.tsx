@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type TouchEvent as ReactTouchEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
@@ -443,6 +448,7 @@ export default function DashboardPage() {
   const [selectedAcademicDate, setSelectedAcademicDate] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [backfillDone, setBackfillDone] = useState(false);
+  const calendarTouchStart = useRef<{ x: number; y: number } | null>(null);
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
@@ -454,6 +460,89 @@ export default function DashboardPage() {
     day: "numeric",
     month: "short",
   }).format(today);
+
+  function goToPreviousCalendarPeriod() {
+    if (calendarView === "month") {
+      setDisplayedMonth(
+        new Date(
+          displayedMonth.getFullYear(),
+          displayedMonth.getMonth() - 1,
+          1
+        )
+      );
+      setSelectedCalendarDate(null);
+      setSelectedBulkDates(new Set());
+      return;
+    }
+
+    const previousWeek = new Date(weekStart);
+    previousWeek.setDate(previousWeek.getDate() - 7);
+    setWeekStart(previousWeek);
+    setSelectedCalendarDate(null);
+  }
+
+  function goToNextCalendarPeriod() {
+    if (calendarView === "month") {
+      setDisplayedMonth(
+        new Date(
+          displayedMonth.getFullYear(),
+          displayedMonth.getMonth() + 1,
+          1
+        )
+      );
+      setSelectedCalendarDate(null);
+      setSelectedBulkDates(new Set());
+      return;
+    }
+
+    const nextWeek = new Date(weekStart);
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    setWeekStart(nextWeek);
+    setSelectedCalendarDate(null);
+  }
+
+  function handleCalendarTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+    if (selectDaysMode) {
+      calendarTouchStart.current = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+    calendarTouchStart.current = touch
+      ? { x: touch.clientX, y: touch.clientY }
+      : null;
+  }
+
+  function handleCalendarTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+    const start = calendarTouchStart.current;
+    calendarTouchStart.current = null;
+
+    if (!start || selectDaysMode) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const horizontalDistance = Math.abs(deltaX);
+
+    if (
+      horizontalDistance < 50 ||
+      horizontalDistance <= Math.abs(deltaY) * 1.5
+    ) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      goToNextCalendarPeriod();
+    } else {
+      goToPreviousCalendarPeriod();
+    }
+  }
 
   useEffect(() => {
     async function getAuthUser() {
@@ -2700,17 +2789,7 @@ export default function DashboardPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Previous month"
-                        onClick={() => {
-                          setDisplayedMonth(
-                            new Date(
-                              displayedMonth.getFullYear(),
-                              displayedMonth.getMonth() - 1,
-                              1
-                            )
-                          );
-                          setSelectedCalendarDate(null);
-                          setSelectedBulkDates(new Set());
-                        }}
+                        onClick={goToPreviousCalendarPeriod}
                       >
                         <ChevronLeft />
                         <span className="sr-only">Previous month</span>
@@ -2720,17 +2799,7 @@ export default function DashboardPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Next month"
-                        onClick={() => {
-                          setDisplayedMonth(
-                            new Date(
-                              displayedMonth.getFullYear(),
-                              displayedMonth.getMonth() + 1,
-                              1
-                            )
-                          );
-                          setSelectedCalendarDate(null);
-                          setSelectedBulkDates(new Set());
-                        }}
+                        onClick={goToNextCalendarPeriod}
                       >
                         <ChevronRight />
                         <span className="sr-only">Next month</span>
@@ -2743,12 +2812,7 @@ export default function DashboardPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Previous week"
-                        onClick={() => {
-                          const previousWeek = new Date(weekStart);
-                          previousWeek.setDate(previousWeek.getDate() - 7);
-                          setWeekStart(previousWeek);
-                          setSelectedCalendarDate(null);
-                        }}
+                        onClick={goToPreviousCalendarPeriod}
                       >
                         <ChevronLeft />
                         <span className="sr-only">Previous week</span>
@@ -2775,12 +2839,7 @@ export default function DashboardPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Next week"
-                        onClick={() => {
-                          const nextWeek = new Date(weekStart);
-                          nextWeek.setDate(nextWeek.getDate() + 7);
-                          setWeekStart(nextWeek);
-                          setSelectedCalendarDate(null);
-                        }}
+                        onClick={goToNextCalendarPeriod}
                       >
                         <ChevronRight />
                         <span className="sr-only">Next week</span>
@@ -2882,6 +2941,11 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
 
+                <div
+                  className="touch-pan-y"
+                  onTouchStart={handleCalendarTouchStart}
+                  onTouchEnd={handleCalendarTouchEnd}
+                >
                 {calendarView === "month" ? (
                   <div className="grid grid-cols-7 gap-2 max-sm:gap-0.5">
                   {WEEKDAY_LABELS.map((label) => (
@@ -3074,6 +3138,7 @@ export default function DashboardPage() {
                     })}
                   </div>
                 )}
+                </div>
 
                 <div className="rounded-lg border border-border px-3 py-2">
                   <Button
