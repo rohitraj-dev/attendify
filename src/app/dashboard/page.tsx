@@ -99,6 +99,10 @@ type CalendarAttendanceRow = AttendanceRow & {
   date: string;
 };
 
+type CalendarOverride = DayOverride & {
+  date: string;
+};
+
 type DayOverride = {
   id: string;
   slot_id: string;
@@ -258,6 +262,12 @@ function timeToMinutes(time: string) {
   return hours * 60 + minutes;
 }
 
+function formatMinutesAsTime(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  return `${`${hours}`.padStart(2, "0")}:${`${minutes}`.padStart(2, "0")}:00`;
+}
+
 function formatMonthLabel(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
@@ -295,6 +305,30 @@ function getCalendarDotClass(status: AttendanceStatus) {
   }
 
   return "bg-zinc-300";
+}
+
+function getWeekStatusClass(status: AttendanceStatus | "upcoming") {
+  if (status === "present") {
+    return "border-emerald-200 bg-emerald-50 dark:border-emerald-950 dark:bg-emerald-950/30";
+  }
+
+  if (status === "absent") {
+    return "border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/30";
+  }
+
+  if (status === "cancelled") {
+    return "border-zinc-300 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800";
+  }
+
+  return "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950";
+}
+
+function getWeekStatusLabel(status: AttendanceStatus | "upcoming") {
+  if (status === "upcoming") {
+    return "Upcoming";
+  }
+
+  return getAttendanceStatusLabel(status);
 }
 
 function getAttendanceStatusLabel(status: AttendanceStatus | null) {
@@ -342,7 +376,19 @@ export default function DashboardPage() {
   const [calendarAttendance, setCalendarAttendance] = useState<
     CalendarAttendanceRow[]
   >([]);
+  const [calendarOverrides, setCalendarOverrides] = useState<
+    CalendarOverride[]
+  >([]);
   const [calendarSubjectId, setCalendarSubjectId] = useState("all");
+  const [calendarView, setCalendarView] = useState<"month" | "week">("month");
+  const [weekStart, setWeekStart] = useState(() => {
+    const date = new Date();
+    const day = date.getDay();
+    const monday = new Date(date);
+    monday.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  });
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(
     null
   );
@@ -964,6 +1010,7 @@ export default function DashboardPage() {
       if (!userId || !activeSemester) {
         setCalendarClasses([]);
         setCalendarAttendance([]);
+        setCalendarOverrides([]);
         setCalendarError(null);
         setIsCalendarLoading(false);
         return;
@@ -1017,6 +1064,7 @@ export default function DashboardPage() {
 
         if (!slotIds.length) {
           setCalendarAttendance([]);
+          setCalendarOverrides([]);
           return;
         }
 
@@ -1026,13 +1074,19 @@ export default function DashboardPage() {
         const monthEndIso = formatLocalDateIso(
           new Date(displayedMonth.getFullYear(), displayedMonth.getMonth() + 1, 0)
         );
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 4);
+        const weekStartIso = formatLocalDateIso(weekStart);
+        const weekEndIso = formatLocalDateIso(weekEnd);
+        const rangeStartIso = monthStartIso < weekStartIso ? monthStartIso : weekStartIso;
+        const rangeEndIso = monthEndIso > weekEndIso ? monthEndIso : weekEndIso;
 
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
           .select("slot_id, date, status")
           .in("slot_id", slotIds)
-          .gte("date", monthStartIso)
-          .lte("date", monthEndIso);
+          .gte("date", rangeStartIso)
+          .lte("date", rangeEndIso);
 
         if (attendanceError) {
           throw attendanceError;
@@ -1043,6 +1097,19 @@ export default function DashboardPage() {
             left.date.localeCompare(right.date)
           )
         );
+
+        const { data: overrideRows, error: overrideError } = await supabase
+          .from("day_overrides")
+          .select("id, slot_id, date, type, new_time")
+          .in("slot_id", slotIds)
+          .gte("date", rangeStartIso)
+          .lte("date", rangeEndIso);
+
+        if (overrideError) {
+          throw overrideError;
+        }
+
+        setCalendarOverrides((overrideRows ?? []) as CalendarOverride[]);
       } catch (loadError) {
         console.error("Failed to load calendar:", loadError);
         setCalendarError(
@@ -1056,7 +1123,7 @@ export default function DashboardPage() {
     }
 
     void loadCalendarData();
-  }, [activeSemester, displayedMonth, supabase, backfillDone, userId]);
+  }, [activeSemester, displayedMonth, supabase, backfillDone, userId, weekStart]);
 
   const exportCSV = () => {
     const headers = [
@@ -1324,6 +1391,18 @@ export default function DashboardPage() {
           { onConflict: "slot_id,date" }
         );
       if (upsertError) throw upsertError;
+      setCalendarOverrides((prev) => [
+        ...prev.filter(
+          (override) => !(override.slot_id === slotId && override.date === date)
+        ),
+        {
+          id: `${slotId}:${date}`,
+          slot_id: slotId,
+          date,
+          type: "cancelled",
+          new_time: null,
+        },
+      ]);
 
       setCalendarAttendance((prev) =>
         prev.some((r) => r.slot_id === slotId && r.date === date)
@@ -1349,6 +1428,11 @@ export default function DashboardPage() {
         .eq("slot_id", slotId)
         .eq("date", date);
       if (deleteError) throw deleteError;
+      setCalendarOverrides((prev) =>
+        prev.filter(
+          (override) => !(override.slot_id === slotId && override.date === date)
+        )
+      );
 
       const { error: upsertError } = await supabase
         .from("attendance_records")
@@ -1554,6 +1638,11 @@ export default function DashboardPage() {
     (alert) => !readAlerts.has(getAlertKey(alert))
   ).length;
   const calendarDays = buildCalendarDays(displayedMonth);
+  const weekDays = Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
+    return date;
+  });
   const academicDays = buildCalendarDays(academicMonth);
   const holidaySet = new Map<string, string>(holidays.map((h) => [h.date, h.reason]));
   const selectedAcademicHoliday = selectedAcademicDate ? holidaySet.get(selectedAcademicDate) : null;
@@ -1578,6 +1667,7 @@ export default function DashboardPage() {
     filteredCalendarClasses.map((item) => item.id)
   );
   const filteredAttendanceByDate = new Map<string, CalendarAttendanceRow[]>();
+  const overrideBySlotDate = new Map<string, CalendarOverride>();
 
   for (const record of calendarAttendance) {
     if (!filteredCalendarSlotIds.has(record.slot_id)) {
@@ -1589,6 +1679,10 @@ export default function DashboardPage() {
     filteredAttendanceByDate.set(record.date, currentRecords);
   }
 
+  for (const override of calendarOverrides) {
+    overrideBySlotDate.set(`${override.date}:${override.slot_id}`, override);
+  }
+
   const selectedCalendarClasses = selectedCalendarDateObject
     ? calendarClasses
         .filter(
@@ -1596,12 +1690,85 @@ export default function DashboardPage() {
             item.dayOfWeek === selectedCalendarDateObject.getDay() &&
             filteredCalendarSlotIds.has(item.id)
         )
-        .map((item) => ({
-          ...item,
-          status:
-            attendanceBySlotDate.get(`${selectedCalendarDate}:${item.id}`) ?? null,
-        }))
+        .map((item) => {
+          const override = overrideBySlotDate.get(
+            `${selectedCalendarDate}:${item.id}`
+          );
+          const duration = Math.max(
+            timeToMinutes(item.endTime) - timeToMinutes(item.startTime),
+            0
+          );
+          const startTime =
+            override?.type === "rescheduled" && override.new_time
+              ? override.new_time
+              : item.startTime;
+
+          return {
+            ...item,
+            timeRange:
+              override?.type === "rescheduled" && override.new_time
+                ? formatTimeRange(
+                    startTime,
+                    formatMinutesAsTime(timeToMinutes(startTime) + duration)
+                  )
+                : item.timeRange,
+            status:
+              override?.type === "cancelled"
+                ? "cancelled"
+                : attendanceBySlotDate.get(`${selectedCalendarDate}:${item.id}`) ??
+                  null,
+          };
+        })
     : [];
+  const weekClassByDate = new Map<
+    string,
+    Array<{
+      item: CalendarClass;
+      status: AttendanceStatus | "upcoming";
+      timeRange: string;
+      sortTime: number;
+    }>
+  >();
+
+  for (const day of weekDays) {
+    const dateKey = formatLocalDateIso(day);
+    if (holidaySet.has(dateKey)) {
+      continue;
+    }
+
+    const dayClasses = filteredCalendarClasses
+      .filter((item) => item.dayOfWeek === day.getDay())
+      .map((item) => {
+        const override = overrideBySlotDate.get(`${dateKey}:${item.id}`);
+        const status: AttendanceStatus | "upcoming" =
+          override?.type === "cancelled"
+            ? "cancelled"
+            : attendanceBySlotDate.get(`${dateKey}:${item.id}`) ??
+              "upcoming";
+        const startTime =
+          override?.type === "rescheduled" && override.new_time
+            ? override.new_time
+            : item.startTime;
+        const duration = Math.max(
+          timeToMinutes(item.endTime) - timeToMinutes(item.startTime),
+          0
+        );
+        const endTime =
+          override?.type === "rescheduled" && override.new_time
+            ? formatMinutesAsTime(timeToMinutes(override.new_time) + duration)
+            : item.endTime;
+
+        return {
+          item,
+          status,
+          timeRange: formatTimeRange(startTime, endTime),
+          sortTime: timeToMinutes(startTime),
+        };
+      })
+      .sort((left, right) => left.sortTime - right.sortTime);
+
+    weekClassByDate.set(dateKey, dayClasses);
+  }
 
   function handleThemeToggle() {
     setIsDarkMode((current) => {
@@ -2060,56 +2227,147 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <CardTitle className="min-w-0 truncate">{formatMonthLabel(displayedMonth)}</CardTitle>
+                  <CardTitle className="min-w-0 truncate">
+                    {calendarView === "month"
+                      ? formatMonthLabel(displayedMonth)
+                      : `${new Intl.DateTimeFormat("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        }).format(weekDays[0])} – ${new Intl.DateTimeFormat(
+                          "en-US",
+                          { month: "short", day: "numeric", year: "numeric" }
+                        ).format(weekDays[4])}`}
+                  </CardTitle>
                   <CardDescription>
-                    Monthly attendance overview for the active semester
+                    {calendarView === "month"
+                      ? "Monthly attendance overview for the active semester"
+                      : "Weekly attendance overview for the active semester"}
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Previous month"
-                    onClick={() => {
-                      setDisplayedMonth(
-                        new Date(
-                          displayedMonth.getFullYear(),
-                          displayedMonth.getMonth() - 1,
-                          1
-                        )
-                      );
-                      setSelectedCalendarDate(null);
-                    }}
-                  >
-                    <ChevronLeft />
-                    <span className="sr-only">Previous month</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Next month"
-                    onClick={() => {
-                      setDisplayedMonth(
-                        new Date(
-                          displayedMonth.getFullYear(),
-                          displayedMonth.getMonth() + 1,
-                          1
-                        )
-                      );
-                      setSelectedCalendarDate(null);
-                    }}
-                  >
-                    <ChevronRight />
-                    <span className="sr-only">Next month</span>
-                  </Button>
+                  {calendarView === "month" ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Previous month"
+                        onClick={() => {
+                          setDisplayedMonth(
+                            new Date(
+                              displayedMonth.getFullYear(),
+                              displayedMonth.getMonth() - 1,
+                              1
+                            )
+                          );
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        <ChevronLeft />
+                        <span className="sr-only">Previous month</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Next month"
+                        onClick={() => {
+                          setDisplayedMonth(
+                            new Date(
+                              displayedMonth.getFullYear(),
+                              displayedMonth.getMonth() + 1,
+                              1
+                            )
+                          );
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        <ChevronRight />
+                        <span className="sr-only">Next month</span>
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Previous week"
+                        onClick={() => {
+                          const previousWeek = new Date(weekStart);
+                          previousWeek.setDate(previousWeek.getDate() - 7);
+                          setWeekStart(previousWeek);
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        <ChevronLeft />
+                        <span className="sr-only">Previous week</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11 px-3 sm:min-h-8"
+                        onClick={() => {
+                          const date = new Date();
+                          const day = date.getDay();
+                          date.setDate(
+                            date.getDate() - (day === 0 ? 6 : day - 1)
+                          );
+                          date.setHours(0, 0, 0, 0);
+                          setWeekStart(date);
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        This week
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Next week"
+                        onClick={() => {
+                          const nextWeek = new Date(weekStart);
+                          nextWeek.setDate(nextWeek.getDate() + 7);
+                          setWeekStart(nextWeek);
+                          setSelectedCalendarDate(null);
+                        }}
+                      >
+                        <ChevronRight />
+                        <span className="sr-only">Next week</span>
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 {calendarError ? (
                   <p className="text-sm text-red-600">{calendarError}</p>
                 ) : null}
+
+                <div className="flex w-full rounded-lg border border-border p-1 sm:w-fit">
+                  <Button
+                    type="button"
+                    variant={calendarView === "month" ? "secondary" : "ghost"}
+                    className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
+                    onClick={() => {
+                      setCalendarView("month");
+                      setSelectedCalendarDate(null);
+                    }}
+                  >
+                    Month
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={calendarView === "week" ? "secondary" : "ghost"}
+                    className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
+                    onClick={() => {
+                      setCalendarView("week");
+                      setSelectedCalendarDate(null);
+                    }}
+                  >
+                    Week
+                  </Button>
+                </div>
 
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <Select
@@ -2157,7 +2415,8 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-7 gap-2 max-sm:gap-0.5">
+                {calendarView === "month" ? (
+                  <div className="grid grid-cols-7 gap-2 max-sm:gap-0.5">
                   {WEEKDAY_LABELS.map((label) => (
                     <div
                       key={label}
@@ -2213,7 +2472,90 @@ export default function DashboardPage() {
                       </button>
                     );
                   })}
-                </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-5">
+                    {weekDays.map((day) => {
+                      const dateKey = formatLocalDateIso(day);
+                      const dayClasses = weekClassByDate.get(dateKey) ?? [];
+                      const holidayReason = holidaySet.get(dateKey);
+                      const isToday = dateKey === localTodayIso;
+
+                      return (
+                        <div
+                          key={dateKey}
+                          className="min-w-0 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+                        >
+                          <div
+                            className={`mb-3 rounded-lg px-2 py-2 ${
+                              isToday
+                                ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
+                                : "bg-zinc-50 dark:bg-zinc-950"
+                            }`}
+                          >
+                            <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
+                              {new Intl.DateTimeFormat("en-US", {
+                                weekday: "short",
+                              }).format(day)}
+                            </p>
+                            <p className="text-lg font-semibold">
+                              {new Intl.DateTimeFormat("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              }).format(day)}
+                            </p>
+                          </div>
+
+                          {holidayReason ? (
+                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-950 dark:bg-amber-950/30 dark:text-amber-200">
+                              Holiday: {holidayReason}
+                            </p>
+                          ) : dayClasses.length ? (
+                            <div className="space-y-2">
+                              {dayClasses.map(({ item, status, timeRange }) => (
+                                <button
+                                  key={`${dateKey}-${item.id}`}
+                                  type="button"
+                                  className={`flex min-h-11 w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition hover:shadow-sm ${getWeekStatusClass(
+                                    status
+                                  )}`}
+                                  onClick={() => setSelectedCalendarDate(dateKey)}
+                                >
+                                  <span
+                                    className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                                      status === "present"
+                                        ? "bg-emerald-500"
+                                        : status === "absent"
+                                          ? "bg-red-500"
+                                          : status === "cancelled"
+                                            ? "bg-zinc-400"
+                                                : "bg-zinc-300"
+                                    }`}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-medium">
+                                      {item.subjectName}
+                                    </span>
+                                    <span className="block text-xs text-muted-foreground">
+                                      {timeRange}
+                                    </span>
+                                    <span className="block text-[11px] font-medium text-muted-foreground">
+                                      {getWeekStatusLabel(status)}
+                                    </span>
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="px-1 py-3 text-xs text-muted-foreground">
+                              No classes
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {isCalendarLoading ? (
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 dark:border-zinc-800 dark:bg-zinc-900">
