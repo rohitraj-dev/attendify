@@ -31,7 +31,7 @@ export interface Subject {
   pass_percent: number;
 }
 
-export type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem";
+export type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem" | "teacher";
 
 export interface Mark {
   id: string;

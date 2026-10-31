@@ -45,7 +45,7 @@ create table public.exams (
 create table public.marks (
   id uuid primary key default gen_random_uuid(),
   subject_id uuid not null references public.subjects (id) on delete cascade,
-  component text not null check (component in ('quiz1', 'midsem', 'quiz2', 'endsem')),
+  component text not null check (component in ('quiz1', 'midsem', 'quiz2', 'endsem', 'teacher')),
   marks_obtained numeric,
   max_marks numeric not null,
   created_at timestamptz default now(),
