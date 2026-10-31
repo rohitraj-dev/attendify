@@ -24,8 +24,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
+import { toast } from "sonner";
 
 const THEME_STORAGE_KEY = "attendify-theme";
 
@@ -34,6 +36,7 @@ type SubjectRow = {
   name: string;
   code: string;
   min_attendance_percent: number;
+  pass_percent: number;
   semester_id: string;
 };
 
@@ -63,6 +66,34 @@ type AttendanceRecord = {
   date: string;
   status: "present" | "absent" | "cancelled";
 };
+
+type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem";
+
+type MarkDraft = {
+  id?: string;
+  marksObtained: string;
+  maxMarks: string;
+};
+
+const MARK_COMPONENTS: Array<{
+  component: MarkComponent;
+  label: string;
+  defaultMaxMarks: number;
+}> = [
+  { component: "quiz1", label: "Quiz 1", defaultMaxMarks: 10 },
+  { component: "midsem", label: "Midsem", defaultMaxMarks: 30 },
+  { component: "quiz2", label: "Quiz 2", defaultMaxMarks: 10 },
+  { component: "endsem", label: "Endsem", defaultMaxMarks: 50 },
+];
+
+function createDefaultMarks(): Record<MarkComponent, MarkDraft> {
+  return Object.fromEntries(
+    MARK_COMPONENTS.map(({ component, defaultMaxMarks }) => [
+      component,
+      { marksObtained: "", maxMarks: String(defaultMaxMarks) },
+    ])
+  ) as Record<MarkComponent, MarkDraft>;
+}
 
 const DAY_NAMES: Record<number, string> = {
   1: "Monday",
@@ -140,6 +171,10 @@ function getProgressClass(percentage: number | null, minPercent: number) {
   return "[&_[data-slot=progress-indicator]]:bg-red-500";
 }
 
+function formatMarkValue(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
 export default function SubjectDetailPage() {
   const router = useRouter();
   const rawParams = useParams();
@@ -157,6 +192,10 @@ export default function SubjectDetailPage() {
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [dayOverrides, setDayOverrides] = useState<DayOverrideRow[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [marks, setMarks] = useState<Record<MarkComponent, MarkDraft>>(
+    createDefaultMarks
+  );
+  const [passPercent, setPassPercent] = useState("40");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingRecordKey, setUpdatingRecordKey] = useState<string | null>(null);
@@ -197,7 +236,7 @@ export default function SubjectDetailPage() {
         // 1. Fetch subject details
         const { data: subjectData, error: subjectError } = await supabase
           .from("subjects")
-          .select("id, name, code, min_attendance_percent, semester_id")
+          .select("id, name, code, min_attendance_percent, pass_percent, semester_id")
           .eq("id", subjectId)
           .single();
 
@@ -209,6 +248,34 @@ export default function SubjectDetailPage() {
         }
 
         setSubject(subjectData as SubjectRow);
+        setPassPercent(String(subjectData.pass_percent ?? 40));
+
+        const { data: marksData, error: marksError } = await supabase
+          .from("marks")
+          .select("id, component, marks_obtained, max_marks")
+          .eq("subject_id", subjectId);
+
+        if (marksError) throw marksError;
+
+        const loadedMarks = createDefaultMarks();
+        for (const mark of (marksData ?? []) as Array<{
+          id: string;
+          component: MarkComponent;
+          marks_obtained: number | null;
+          max_marks: number;
+        }>) {
+          if (loadedMarks[mark.component]) {
+            loadedMarks[mark.component] = {
+              id: mark.id,
+              marksObtained:
+                mark.marks_obtained === null
+                  ? ""
+                  : String(mark.marks_obtained),
+              maxMarks: String(mark.max_marks),
+            };
+          }
+        }
+        setMarks(loadedMarks);
 
         // 1b. Fetch semester details using subject's semester_id
         const { data: semesterData, error: semesterError } = await supabase
@@ -304,6 +371,82 @@ export default function SubjectDetailPage() {
     }
   }
 
+  async function saveMark(component: MarkComponent) {
+    const draft = marks[component];
+    const marksObtained =
+      draft.marksObtained.trim() === "" ? null : Number(draft.marksObtained);
+    const maxMarks = Number(draft.maxMarks);
+
+    if (
+      (marksObtained !== null &&
+        (!Number.isFinite(marksObtained) || marksObtained < 0)) ||
+      draft.maxMarks.trim() === "" ||
+      !Number.isFinite(maxMarks) ||
+      maxMarks < 0 ||
+      (marksObtained !== null && marksObtained > maxMarks)
+    ) {
+      toast.error("Marks obtained must be between 0 and the max marks.");
+      return;
+    }
+
+    const { data, error: saveError } = await supabase
+      .from("marks")
+      .upsert(
+        {
+          subject_id: subjectId,
+          component,
+          marks_obtained: marksObtained,
+          max_marks: maxMarks,
+        },
+        { onConflict: "subject_id,component" }
+      )
+      .select("id")
+      .single();
+
+    if (saveError) {
+      console.error("Failed to save marks:", saveError);
+      toast.error("Failed to save marks.");
+      return;
+    }
+
+    setMarks((currentMarks) => ({
+      ...currentMarks,
+      [component]: {
+        ...currentMarks[component],
+        id: data?.id ?? currentMarks[component].id,
+      },
+    }));
+  }
+
+  async function savePassPercent() {
+    const nextPassPercent = Number(passPercent);
+    if (
+      !Number.isFinite(nextPassPercent) ||
+      nextPassPercent < 0 ||
+      nextPassPercent > 100
+    ) {
+      toast.error("Pass percent must be between 0 and 100.");
+      return;
+    }
+
+    const { error: saveError } = await supabase
+      .from("subjects")
+      .update({ pass_percent: nextPassPercent })
+      .eq("id", subjectId);
+
+    if (saveError) {
+      console.error("Failed to save pass percent:", saveError);
+      toast.error("Failed to save pass percent.");
+      return;
+    }
+
+    setSubject((currentSubject) =>
+      currentSubject
+        ? { ...currentSubject, pass_percent: nextPassPercent }
+        : currentSubject
+    );
+  }
+
   // Statistics calculation
   const presentCount = records.filter((r) => r.status === "present").length;
   const absentCount = records.filter((r) => r.status === "absent").length;
@@ -326,6 +469,38 @@ export default function SubjectDetailPage() {
           Math.ceil(((minPercent / 100) * totalHeld - presentCount) / (1 - minPercent / 100))
         )
       : 0;
+
+  const markValues = MARK_COMPONENTS.map(({ component }) => marks[component]);
+  const totalMarks = markValues.reduce(
+    (total, mark) => total + (Number(mark.maxMarks) || 0),
+    0
+  );
+  const totalObtained = markValues.reduce(
+    (total, mark) =>
+      total +
+      (mark.marksObtained.trim() === "" ? 0 : Number(mark.marksObtained) || 0),
+    0
+  );
+  const maxTakenMarks = markValues.reduce(
+    (total, mark) =>
+      total +
+      (mark.marksObtained.trim() === "" ? 0 : Number(mark.maxMarks) || 0),
+    0
+  );
+  const remainingMarks = markValues.reduce(
+    (total, mark) =>
+      total +
+      (mark.marksObtained.trim() === "" ? Number(mark.maxMarks) || 0 : 0),
+    0
+  );
+  const passMarks = (Number(passPercent) || 0) * (totalMarks / 100);
+  const neededMarks = Math.max(0, passMarks - totalObtained);
+  const marksStatus =
+    neededMarks > remainingMarks
+      ? "cannot-pass"
+      : neededMarks === 0
+        ? "passed"
+        : "needs-marks";
 
   let currentStreak = 0;
   for (const r of records) {
@@ -654,6 +829,156 @@ export default function SubjectDetailPage() {
                     <p className="text-sm sm:text-base font-semibold tracking-tight text-amber-700 dark:text-amber-300 flex items-center justify-center gap-1 mt-0.5">
                       <Flame className={`h-4 w-4 ${currentStreak > 0 ? "fill-amber-500 text-amber-500" : "text-amber-400"}`} />
                       {currentStreak > 0 ? `${currentStreak} day streak` : "No active streak"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Marks Card */}
+            <Card className="dark:border-zinc-800 dark:bg-zinc-900">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold">Marks</CardTitle>
+                <CardDescription>
+                  Enter marks as they become available. Changes save when you leave a field.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-2">
+                  <div className="hidden grid-cols-[minmax(0,1fr)_8rem_8rem] gap-3 px-1 text-xs font-medium text-muted-foreground sm:grid">
+                    <span>Component</span>
+                    <span>Obtained</span>
+                    <span>Max marks</span>
+                  </div>
+                  {MARK_COMPONENTS.map(({ component, label }) => {
+                    const mark = marks[component];
+
+                    return (
+                      <div
+                        key={component}
+                        className="grid gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800 sm:grid-cols-[minmax(0,1fr)_8rem_8rem] sm:items-center sm:gap-3 sm:border-0 sm:p-1"
+                      >
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {label}
+                        </span>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={mark.maxMarks}
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder="Not taken"
+                          aria-label={`${label} marks obtained`}
+                          value={mark.marksObtained}
+                          onChange={(event) =>
+                            setMarks((currentMarks) => ({
+                              ...currentMarks,
+                              [component]: {
+                                ...currentMarks[component],
+                                marksObtained: event.target.value,
+                              },
+                            }))
+                          }
+                          onBlur={() => void saveMark(component)}
+                        />
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          aria-label={`${label} max marks`}
+                          value={mark.maxMarks}
+                          onChange={(event) =>
+                            setMarks((currentMarks) => ({
+                              ...currentMarks,
+                              [component]: {
+                                ...currentMarks[component],
+                                maxMarks: event.target.value,
+                              },
+                            }))
+                          }
+                          onBlur={() => void saveMark(component)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      Pass percentage
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Pass marks: {formatMarkValue(passMarks)} of {formatMarkValue(totalMarks)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      inputMode="decimal"
+                      className="w-24"
+                      aria-label="Pass percentage"
+                      value={passPercent}
+                      onChange={(event) => setPassPercent(event.target.value)}
+                      onBlur={() => void savePassPercent()}
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Total obtained / max</p>
+                    <p className="text-lg font-semibold tracking-tight">
+                      {formatMarkValue(totalObtained)} / {formatMarkValue(totalMarks)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Max marks taken</p>
+                    <p className="text-lg font-semibold tracking-tight">
+                      {formatMarkValue(maxTakenMarks)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                    <p className="text-xs text-muted-foreground">Remaining available</p>
+                    <p className="text-lg font-semibold tracking-tight">
+                      {formatMarkValue(remainingMarks)}
+                    </p>
+                  </div>
+                  <div
+                    className={`rounded-lg border p-3 ${
+                      marksStatus === "cannot-pass"
+                        ? "border-red-200 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/30"
+                        : marksStatus === "passed"
+                          ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/30"
+                          : "border-amber-200 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/30"
+                    }`}
+                  >
+                    <p className="text-xs text-muted-foreground">Pass status</p>
+                    <p
+                      className={`text-sm font-semibold ${
+                        marksStatus === "cannot-pass"
+                          ? "text-red-700 dark:text-red-300"
+                          : marksStatus === "passed"
+                            ? "text-emerald-700 dark:text-emerald-300"
+                            : "text-amber-700 dark:text-amber-300"
+                      }`}
+                    >
+                      {marksStatus === "cannot-pass"
+                        ? "Cannot pass"
+                        : marksStatus === "passed"
+                          ? "Passed"
+                          : `Need ${formatMarkValue(neededMarks)} of ${formatMarkValue(
+                              remainingMarks
+                            )} remaining marks (${formatMarkValue(
+                              remainingMarks > 0
+                                ? (neededMarks / remainingMarks) * 100
+                                : 0
+                            )}%)`}
                     </p>
                   </div>
                 </div>
