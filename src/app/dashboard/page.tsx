@@ -3280,6 +3280,7 @@ export default function DashboardPage() {
                       day.getMonth() === displayedMonth.getMonth() &&
                       day.getFullYear() === displayedMonth.getFullYear();
                     const dayRecords = filteredAttendanceByDate.get(dateKey) ?? [];
+                    const isHoliday = holidaySet.has(dateKey);
                     const isSelected = selectedCalendarDate === dateKey;
                     const isBulkSelected = selectedBulkDates.has(dateKey);
                     const isToday = dateKey === localTodayIso;
@@ -3318,17 +3319,23 @@ export default function DashboardPage() {
                         >
                           {day.getDate()}
                         </span>
-                        <div className="mt-3 flex flex-wrap gap-1 max-sm:mt-1 max-sm:justify-center max-sm:gap-0.5">
+                        <div className="mt-3 flex max-w-full flex-nowrap justify-center gap-1 overflow-hidden max-sm:mt-1 max-sm:gap-0.5">
+                          {isHoliday ? (
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 max-sm:h-1.5 max-sm:w-1.5"
+                              title="Holiday"
+                            />
+                          ) : null}
                           {examsByDate.has(dateKey) ? (
                             <span
-                              className="h-2.5 w-2.5 rounded-full bg-purple-500 max-sm:h-1.5 max-sm:w-1.5"
+                              className="h-2.5 w-2.5 shrink-0 rounded-full bg-purple-500 max-sm:h-1.5 max-sm:w-1.5"
                               title="Exam"
                             />
                           ) : null}
                           {dayRecords.slice(0, 4).map((record, index) => (
                             <span
                               key={`${record.slot_id}-${record.status}-${index}`}
-                              className={`h-2.5 w-2.5 rounded-full max-sm:h-1.5 max-sm:w-1.5 ${getCalendarDotClass(
+                              className={`h-2.5 w-2.5 shrink-0 rounded-full max-sm:h-1.5 max-sm:w-1.5 ${getCalendarDotClass(
                                 record.status
                               )}`}
                             />
@@ -3381,7 +3388,7 @@ export default function DashboardPage() {
                                 <span className="flex shrink-0 items-center gap-1.5 pt-1">
                                   {holidayReason ? (
                                     <span
-                                      className="h-2.5 w-2.5 rounded-full bg-amber-500"
+                                      className="h-2.5 w-2.5 rounded-full bg-red-500"
                                       title={`Holiday: ${holidayReason}`}
                                     />
                                   ) : null}
@@ -3394,7 +3401,7 @@ export default function DashboardPage() {
                                 </span>
                               </div>
                               {holidayReason ? (
-                                <span className="mt-1 block truncate text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                <span className="mt-1 block truncate text-[11px] font-medium text-red-700 dark:text-red-300">
                                   Holiday · {holidayReason}
                                 </span>
                               ) : dayExams.length ? (
@@ -3554,7 +3561,7 @@ export default function DashboardPage() {
                       ["Present", "bg-emerald-500"],
                       ["Absent", "bg-red-500"],
                       ["Cancelled", "bg-zinc-400"],
-                      ["Holiday", "bg-amber-500"],
+                      ["Holiday", "bg-red-500"],
                       ["Exam", "bg-purple-500"],
                       ["Upcoming", "bg-zinc-300"],
                     ].map(([label, dotClass]) => (
