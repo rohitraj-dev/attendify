@@ -78,20 +78,20 @@ type MarkDraft = {
 const MARK_COMPONENTS: Array<{
   component: MarkComponent;
   label: string;
-  defaultMaxMarks: number;
+  maxMarks: number;
 }> = [
-  { component: "quiz1", label: "Quiz 1", defaultMaxMarks: 10 },
-  { component: "midsem", label: "Midsem", defaultMaxMarks: 25 },
-  { component: "quiz2", label: "Quiz 2", defaultMaxMarks: 10 },
-  { component: "endsem", label: "Endsem", defaultMaxMarks: 50 },
-  { component: "teacher", label: "Teacher", defaultMaxMarks: 5 },
+  { component: "quiz1", label: "Quiz 1", maxMarks: 10 },
+  { component: "midsem", label: "Midsem", maxMarks: 25 },
+  { component: "quiz2", label: "Quiz 2", maxMarks: 10 },
+  { component: "endsem", label: "Endsem", maxMarks: 50 },
+  { component: "teacher", label: "Teacher", maxMarks: 5 },
 ];
 
 function createDefaultMarks(): Record<MarkComponent, MarkDraft> {
   return Object.fromEntries(
-    MARK_COMPONENTS.map(({ component, defaultMaxMarks }) => [
+    MARK_COMPONENTS.map(({ component, maxMarks }) => [
       component,
-      { marksObtained: "", maxMarks: String(defaultMaxMarks) },
+      { marksObtained: "", maxMarks: String(maxMarks) },
     ])
   ) as Record<MarkComponent, MarkDraft>;
 }
@@ -268,14 +268,26 @@ export default function SubjectDetailPage() {
           marks_obtained: number | null;
           max_marks: number;
         }>) {
+          const markConfig = MARK_COMPONENTS.find(
+            ({ component }) => component === mark.component
+          );
+          if (!markConfig) continue;
+
+          if (mark.max_marks !== markConfig.maxMarks) {
+            const { error: normalizeError } = await supabase
+              .from("marks")
+              .update({ max_marks: markConfig.maxMarks })
+              .eq("id", mark.id);
+
+            if (normalizeError) throw normalizeError;
+          }
+
           if (
             loadedMarks[mark.component] &&
-            Number.isFinite(mark.max_marks) &&
-            mark.max_marks > 0 &&
             (mark.marks_obtained === null ||
               (Number.isFinite(mark.marks_obtained) &&
                 mark.marks_obtained >= 0 &&
-                mark.marks_obtained <= mark.max_marks))
+                mark.marks_obtained <= markConfig.maxMarks))
           ) {
             loadedMarks[mark.component] = {
               id: mark.id,
@@ -283,7 +295,7 @@ export default function SubjectDetailPage() {
                 mark.marks_obtained === null
                   ? ""
                   : String(mark.marks_obtained),
-              maxMarks: String(mark.max_marks),
+              maxMarks: String(markConfig.maxMarks),
             };
           }
         }
@@ -385,21 +397,27 @@ export default function SubjectDetailPage() {
   }
 
   async function saveMark(component: MarkComponent) {
+    const markConfig = MARK_COMPONENTS.find(
+      ({ component: markComponent }) => markComponent === component
+    );
+    if (!markConfig) {
+      console.error(`Unknown mark component: ${component}`);
+      toast.error("Failed to save marks.");
+      return;
+    }
+
     const draft = marks[component];
     const marksObtained =
       draft.marksObtained.trim() === "" ? null : Number(draft.marksObtained);
-    const maxMarks = Number(draft.maxMarks);
+    const maxMarks = markConfig.maxMarks;
 
     if (
       (marksObtained !== null &&
         (!Number.isFinite(marksObtained) ||
           marksObtained < 0 ||
-          marksObtained > maxMarks)) ||
-      draft.maxMarks.trim() === "" ||
-      !Number.isFinite(maxMarks) ||
-      maxMarks <= 0
+          marksObtained > maxMarks))
     ) {
-      toast.error("Marks obtained must be between 0 and the max marks, and max marks must be greater than 0.");
+      toast.error("Marks obtained must be between 0 and the max marks.");
       setMarks((currentMarks) => ({
         ...currentMarks,
         [component]: savedMarks[component],
@@ -495,27 +513,30 @@ export default function SubjectDetailPage() {
         )
       : 0;
 
-  const markValues = MARK_COMPONENTS.map(({ component }) => savedMarks[component]);
+  const markValues = MARK_COMPONENTS.map(({ component, maxMarks }) => ({
+    mark: savedMarks[component],
+    maxMarks,
+  }));
   const totalMarks = markValues.reduce(
-    (total, mark) => total + (Number(mark.maxMarks) || 0),
+    (total, { maxMarks }) => total + maxMarks,
     0
   );
   const totalObtained = markValues.reduce(
-    (total, mark) =>
+    (total, { mark }) =>
       total +
       (mark.marksObtained.trim() === "" ? 0 : Number(mark.marksObtained) || 0),
     0
   );
   const maxTakenMarks = markValues.reduce(
-    (total, mark) =>
+    (total, { mark, maxMarks }) =>
       total +
-      (mark.marksObtained.trim() === "" ? 0 : Number(mark.maxMarks) || 0),
+      (mark.marksObtained.trim() === "" ? 0 : maxMarks),
     0
   );
   const remainingMarks = markValues.reduce(
-    (total, mark) =>
+    (total, { mark, maxMarks }) =>
       total +
-      (mark.marksObtained.trim() === "" ? Number(mark.maxMarks) || 0 : 0),
+      (mark.marksObtained.trim() === "" ? maxMarks : 0),
     0
   );
   const passMarks = (Number(passPercent) || 0) * (totalMarks / 100);
@@ -875,7 +896,7 @@ export default function SubjectDetailPage() {
                     <span>Obtained</span>
                     <span>Max marks</span>
                   </div>
-                  {MARK_COMPONENTS.map(({ component, label }) => {
+                  {MARK_COMPONENTS.map(({ component, label, maxMarks }) => {
                     const mark = marks[component];
 
                     return (
@@ -889,7 +910,7 @@ export default function SubjectDetailPage() {
                         <Input
                           type="number"
                           min="0"
-                          max={mark.maxMarks}
+                          max={maxMarks}
                           step="0.01"
                           inputMode="decimal"
                           className="min-h-11 sm:min-h-9"
@@ -907,25 +928,9 @@ export default function SubjectDetailPage() {
                           }
                           onBlur={() => void saveMark(component)}
                         />
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          inputMode="decimal"
-                          className="min-h-11 sm:min-h-9"
-                          aria-label={`${label} max marks`}
-                          value={mark.maxMarks}
-                          onChange={(event) =>
-                            setMarks((currentMarks) => ({
-                              ...currentMarks,
-                              [component]: {
-                                ...currentMarks[component],
-                                maxMarks: event.target.value,
-                              },
-                            }))
-                          }
-                          onBlur={() => void saveMark(component)}
-                        />
+                        <span className="flex min-h-11 items-center text-sm text-muted-foreground sm:min-h-9">
+                          / {maxMarks}
+                        </span>
                       </div>
                     );
                   })}
