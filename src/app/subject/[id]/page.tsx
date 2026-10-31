@@ -67,7 +67,7 @@ type AttendanceRecord = {
   status: "present" | "absent" | "cancelled";
 };
 
-type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem";
+type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem" | "teacher";
 
 type MarkDraft = {
   id?: string;
@@ -81,9 +81,10 @@ const MARK_COMPONENTS: Array<{
   defaultMaxMarks: number;
 }> = [
   { component: "quiz1", label: "Quiz 1", defaultMaxMarks: 10 },
-  { component: "midsem", label: "Midsem", defaultMaxMarks: 30 },
+  { component: "midsem", label: "Midsem", defaultMaxMarks: 25 },
   { component: "quiz2", label: "Quiz 2", defaultMaxMarks: 10 },
   { component: "endsem", label: "Endsem", defaultMaxMarks: 50 },
+  { component: "teacher", label: "Teacher", defaultMaxMarks: 5 },
 ];
 
 function createDefaultMarks(): Record<MarkComponent, MarkDraft> {
@@ -891,7 +892,8 @@ export default function SubjectDetailPage() {
                           max={mark.maxMarks}
                           step="0.01"
                           inputMode="decimal"
-                          placeholder="Not taken"
+                          className="min-h-11 sm:min-h-9"
+                          placeholder={component === "teacher" ? "Not given" : "Not taken"}
                           aria-label={`${label} marks obtained`}
                           value={mark.marksObtained}
                           onChange={(event) =>
@@ -910,6 +912,7 @@ export default function SubjectDetailPage() {
                           min="0"
                           step="0.01"
                           inputMode="decimal"
+                          className="min-h-11 sm:min-h-9"
                           aria-label={`${label} max marks`}
                           value={mark.maxMarks}
                           onChange={(event) =>
@@ -944,7 +947,7 @@ export default function SubjectDetailPage() {
                       max="100"
                       step="0.01"
                       inputMode="decimal"
-                      className="w-24"
+                      className="min-h-11 w-24 sm:min-h-9"
                       aria-label="Pass percentage"
                       value={passPercent}
                       onChange={(event) => setPassPercent(event.target.value)}
