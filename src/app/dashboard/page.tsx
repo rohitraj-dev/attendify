@@ -2433,6 +2433,7 @@ export default function DashboardPage() {
     Math.ceil(Math.max(baseTimelineEnd, 15 * 60) / 60) * 60;
   const timelineHourHeight = 72;
   const lunchRowHeight = 30;
+  const timelineTopPadding = 18;
   const timelineHours = Array.from(
     { length: Math.max((timelineEnd - timelineStart) / 60, 1) },
     (_, index) => timelineStart + index * 60
@@ -2440,8 +2441,10 @@ export default function DashboardPage() {
   const timelineHeight =
     (timelineEnd - timelineStart) * (timelineHourHeight / 60) +
     lunchRowHeight -
-    90 * (timelineHourHeight / 60);
+    90 * (timelineHourHeight / 60) +
+    timelineTopPadding;
   const timelinePosition = (minutes: number) =>
+    timelineTopPadding +
     getWeekTimelinePosition(
       minutes,
       timelineStart,
@@ -3303,9 +3306,9 @@ export default function DashboardPage() {
                   })}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-border">
-                    <div className="min-w-[960px]">
-                      <div className="grid grid-cols-[76px_repeat(5,minmax(0,1fr))]">
+                  <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-border sm:overflow-visible">
+                    <div className="min-w-[960px] sm:min-w-0">
+                      <div className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))]">
                         <div className="sticky left-0 z-30 border-r border-border bg-background" />
                         {weekDays.map((day) => {
                           const dateKey = formatLocalDateIso(day);
@@ -3369,7 +3372,7 @@ export default function DashboardPage() {
                       </div>
 
                       <div
-                        className="grid grid-cols-[76px_repeat(5,minmax(0,1fr))]"
+                        className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))]"
                         style={{ height: `${timelineHeight}px` }}
                       >
                         <div className="sticky left-0 z-20 border-r border-border bg-background">
