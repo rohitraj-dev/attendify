@@ -26,7 +26,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import {
+  calculateMarkSummary,
+  MARK_COMPONENTS,
+} from "@/lib/marks";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
+import type { MarkComponent } from "@/lib/types";
 import { toast } from "sonner";
 
 const THEME_STORAGE_KEY = "attendify-theme";
@@ -67,25 +72,11 @@ type AttendanceRecord = {
   status: "present" | "absent" | "cancelled";
 };
 
-type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem" | "teacher";
-
 type MarkDraft = {
   id?: string;
   marksObtained: string;
   maxMarks: string;
 };
-
-const MARK_COMPONENTS: Array<{
-  component: MarkComponent;
-  label: string;
-  maxMarks: number;
-}> = [
-  { component: "quiz1", label: "Quiz 1", maxMarks: 10 },
-  { component: "midsem", label: "Midsem", maxMarks: 25 },
-  { component: "quiz2", label: "Quiz 2", maxMarks: 10 },
-  { component: "endsem", label: "Endsem", maxMarks: 50 },
-  { component: "teacher", label: "Teacher", maxMarks: 5 },
-];
 
 function createDefaultMarks(): Record<MarkComponent, MarkDraft> {
   return Object.fromEntries(
@@ -513,40 +504,24 @@ export default function SubjectDetailPage() {
         )
       : 0;
 
-  const markValues = MARK_COMPONENTS.map(({ component, maxMarks }) => ({
-    mark: savedMarks[component],
-    maxMarks,
-  }));
-  const totalMarks = markValues.reduce(
-    (total, { maxMarks }) => total + maxMarks,
-    0
+  const markSummary = calculateMarkSummary(
+    Object.fromEntries(
+      MARK_COMPONENTS.map(({ component }) => {
+        const obtained = savedMarks[component].marksObtained.trim();
+        return [component, obtained === "" ? null : Number(obtained)];
+      })
+    ),
+    Number(passPercent) || 0
   );
-  const totalObtained = markValues.reduce(
-    (total, { mark }) =>
-      total +
-      (mark.marksObtained.trim() === "" ? 0 : Number(mark.marksObtained) || 0),
-    0
-  );
-  const maxTakenMarks = markValues.reduce(
-    (total, { mark, maxMarks }) =>
-      total +
-      (mark.marksObtained.trim() === "" ? 0 : maxMarks),
-    0
-  );
-  const remainingMarks = markValues.reduce(
-    (total, { mark, maxMarks }) =>
-      total +
-      (mark.marksObtained.trim() === "" ? maxMarks : 0),
-    0
-  );
-  const passMarks = (Number(passPercent) || 0) * (totalMarks / 100);
-  const neededMarks = Math.max(0, passMarks - totalObtained);
-  const marksStatus =
-    neededMarks > remainingMarks
-      ? "cannot-pass"
-      : neededMarks === 0
-        ? "passed"
-        : "needs-marks";
+  const {
+    totalObtained,
+    maxTakenMarks,
+    remainingMarks,
+    passMarks,
+    neededMarks,
+    status: marksStatus,
+  } = markSummary;
+  const totalMarks = 100;
 
   let currentStreak = 0;
   for (const r of records) {

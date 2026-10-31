@@ -66,8 +66,13 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  calculateMarkSummary,
+  MARK_COMPONENTS,
+  TOTAL_MARKS,
+} from "@/lib/marks";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
-import type { AttendanceStatus, Exam } from "@/lib/types";
+import type { AttendanceStatus, Exam, MarkComponent } from "@/lib/types";
 
 const THEME_STORAGE_KEY = "attendify-theme";
 
@@ -147,6 +152,14 @@ type SubjectStat = {
   remainingClasses: number;
   bestCasePercent: number | null;
   worstCasePercent: number | null;
+};
+
+type SubjectMarks = {
+  id: string;
+  name: string;
+  code: string;
+  passPercent: number;
+  obtained: Partial<Record<MarkComponent, number | null>>;
 };
 
 type AlertItem = {
@@ -360,6 +373,10 @@ function getAttendanceStatusLabel(status: AttendanceStatus | null) {
   return "No record";
 }
 
+function formatMarkValue(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
 function examAffectsSubject(exam: Exam, subjectId: string) {
   return exam.subject_id === null || exam.subject_id === subjectId;
 }
@@ -381,6 +398,7 @@ export default function DashboardPage() {
   const [classes, setClasses] = useState<DashboardClass[]>([]);
   const [todayExams, setTodayExams] = useState<DashboardExam[]>([]);
   const [subjectStats, setSubjectStats] = useState<SubjectStat[]>([]);
+  const [subjectMarks, setSubjectMarks] = useState<SubjectMarks[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [overrides, setOverrides] = useState<Record<string, DayOverride>>({});
   const [activeSemester, setActiveSemester] = useState<ActiveSemester | null>(
@@ -786,6 +804,7 @@ export default function DashboardPage() {
 
       if (!typedSubjects.length) {
         setSubjectStats([]);
+        setSubjectMarks([]);
         setAlerts([]);
         return [];
       }
@@ -1008,6 +1027,73 @@ export default function DashboardPage() {
       return typedStatSlots;
     }
 
+    async function loadMarks(activeSemester: ActiveSemester) {
+      const { data: subjects, error: subjectsError } = await supabase
+        .from("subjects")
+        .select("id, name, code, pass_percent")
+        .eq("semester_id", activeSemester.id);
+
+      if (subjectsError) {
+        throw subjectsError;
+      }
+
+      const typedSubjects = (subjects ?? []) as Array<{
+        id: string;
+        name: string;
+        code: string;
+        pass_percent: number;
+      }>;
+      if (!typedSubjects.length) {
+        setSubjectMarks([]);
+        return;
+      }
+
+      const subjectIds = typedSubjects.map((subject) => subject.id);
+      const { data: marks, error: marksError } = await supabase
+        .from("marks")
+        .select("subject_id, component, marks_obtained")
+        .in("subject_id", subjectIds);
+
+      if (marksError) {
+        throw marksError;
+      }
+
+      const marksBySubject = new Map<
+        string,
+        Partial<Record<MarkComponent, number | null>>
+      >();
+      for (const mark of (marks ?? []) as Array<{
+        subject_id: string;
+        component: MarkComponent;
+        marks_obtained: number | null;
+      }>) {
+        const markConfig = MARK_COMPONENTS.find(
+          ({ component }) => component === mark.component
+        );
+        if (
+          markConfig &&
+          mark.marks_obtained !== null &&
+          Number.isFinite(mark.marks_obtained) &&
+          mark.marks_obtained >= 0 &&
+          mark.marks_obtained <= markConfig.maxMarks
+        ) {
+          const subjectMarks = marksBySubject.get(mark.subject_id) ?? {};
+          subjectMarks[mark.component] = mark.marks_obtained;
+          marksBySubject.set(mark.subject_id, subjectMarks);
+        }
+      }
+
+      setSubjectMarks(
+        typedSubjects.map((subject) => ({
+          id: subject.id,
+          name: subject.name,
+          code: subject.code,
+          passPercent: subject.pass_percent,
+          obtained: marksBySubject.get(subject.id) ?? {},
+        }))
+      );
+    }
+
     async function loadDashboard() {
       if (!userId) {
         return;
@@ -1085,6 +1171,7 @@ export default function DashboardPage() {
 
         const semesterExams = (examRows ?? []) as Exam[];
         const statSlots = await loadStats(semester, holidayDates, semesterExams);
+        await loadMarks(semester);
 
         const { data: slotRows, error: slotsError } = await supabase
           .from("schedule_slots")
@@ -2460,11 +2547,12 @@ export default function DashboardPage() {
         </div>
 
         <Tabs defaultValue="today" className="gap-4">
-          <TabsList className="max-sm:grid max-sm:w-full max-sm:grid-cols-4">
-            <TabsTrigger className="text-xs sm:text-sm" value="today">Today</TabsTrigger>
-            <TabsTrigger className="text-xs sm:text-sm" value="stats">Stats</TabsTrigger>
-            <TabsTrigger className="text-xs sm:text-sm" value="calendar">Calendar</TabsTrigger>
-            <TabsTrigger className="text-xs sm:text-sm" value="academic">Academic</TabsTrigger>
+        <TabsList className="max-sm:grid max-sm:w-full max-sm:grid-cols-5">
+          <TabsTrigger className="min-h-11 px-1 text-xs sm:min-h-8 sm:px-3 sm:text-sm" value="today">Today</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-1 text-xs sm:min-h-8 sm:px-3 sm:text-sm" value="stats">Stats</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-1 text-xs sm:min-h-8 sm:px-3 sm:text-sm" value="marks">Marks</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-1 text-xs sm:min-h-8 sm:px-3 sm:text-sm" value="calendar">Calendar</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-1 text-xs sm:min-h-8 sm:px-3 sm:text-sm" value="academic">Academic</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="space-y-4">
@@ -2760,6 +2848,107 @@ export default function DashboardPage() {
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">
                     No subject stats available
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="marks" className="space-y-4">
+            {subjectMarks.some((subject) =>
+              MARK_COMPONENTS.some(({ component }) => {
+                const obtained = subject.obtained[component];
+                return obtained !== null && obtained !== undefined;
+              })
+            ) ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Marks</CardTitle>
+                  <CardDescription>
+                    Fixed total: {TOTAL_MARKS} marks
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="hidden grid-cols-[minmax(12rem,1.4fr)_repeat(5,minmax(4.5rem,1fr))_minmax(8rem,1fr)] gap-3 px-3 text-xs font-medium text-muted-foreground sm:grid">
+                    <span>Subject</span>
+                    {MARK_COMPONENTS.map(({ component, label }) => (
+                      <span key={component}>{label}</span>
+                    ))}
+                    <span>Total / 100</span>
+                    <span>Status</span>
+                  </div>
+                  {subjectMarks.map((subject) => {
+                    const summary = calculateMarkSummary(
+                      subject.obtained,
+                      subject.passPercent
+                    );
+
+                    return (
+                      <Card
+                        key={subject.id}
+                        role="link"
+                        tabIndex={0}
+                        className="group cursor-pointer transition hover:border-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 dark:hover:border-zinc-700 dark:focus-visible:ring-zinc-100"
+                        onClick={() => router.push(`/subject/${subject.id}`)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(`/subject/${subject.id}`);
+                          }
+                        }}
+                      >
+                        <CardContent className="grid gap-3 p-4 sm:grid-cols-[minmax(12rem,1.4fr)_repeat(5,minmax(4.5rem,1fr))_minmax(8rem,1fr)] sm:items-center sm:gap-3">
+                          <div className="flex min-w-0 items-center justify-between gap-3 sm:block">
+                            <div className="min-w-0">
+                              <p className="break-words font-medium">{subject.name}</p>
+                              <p className="text-sm text-muted-foreground">{subject.code}</p>
+                            </div>
+                            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:hidden" />
+                          </div>
+                          {MARK_COMPONENTS.map(({ component, label }) => {
+                            const obtained = subject.obtained[component];
+                            return (
+                              <div key={component} className="flex items-center justify-between text-sm sm:block">
+                                <span className="text-muted-foreground sm:hidden">{label}</span>
+                                <span>{obtained === null || obtained === undefined ? "–" : formatMarkValue(obtained)}</span>
+                              </div>
+                            );
+                          })}
+                          <div className="flex items-center justify-between text-sm sm:block">
+                            <span className="text-muted-foreground sm:hidden">Total / 100</span>
+                            <span className="font-semibold">
+                              {formatMarkValue(summary.totalObtained)} / {TOTAL_MARKS}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm sm:block">
+                            <span className="text-muted-foreground sm:hidden">Status</span>
+                            <span
+                              className={
+                                summary.status === "passed"
+                                  ? "font-medium text-emerald-600 dark:text-emerald-400"
+                                  : summary.status === "cannot-pass"
+                                    ? "font-medium text-red-600 dark:text-red-400"
+                                    : "font-medium text-amber-600 dark:text-amber-400"
+                              }
+                            >
+                              {summary.status === "passed"
+                                ? "Passed"
+                                : summary.status === "cannot-pass"
+                                  ? "Cannot pass"
+                                  : `Need ${formatMarkValue(summary.neededMarks)} of ${formatMarkValue(summary.remainingMarks)} remaining`}
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    No marks entered yet
                   </p>
                 </CardContent>
               </Card>
