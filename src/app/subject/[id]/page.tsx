@@ -195,6 +195,9 @@ export default function SubjectDetailPage() {
   const [marks, setMarks] = useState<Record<MarkComponent, MarkDraft>>(
     createDefaultMarks
   );
+  const [savedMarks, setSavedMarks] = useState<Record<MarkComponent, MarkDraft>>(
+    createDefaultMarks
+  );
   const [passPercent, setPassPercent] = useState("40");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -264,7 +267,15 @@ export default function SubjectDetailPage() {
           marks_obtained: number | null;
           max_marks: number;
         }>) {
-          if (loadedMarks[mark.component]) {
+          if (
+            loadedMarks[mark.component] &&
+            Number.isFinite(mark.max_marks) &&
+            mark.max_marks > 0 &&
+            (mark.marks_obtained === null ||
+              (Number.isFinite(mark.marks_obtained) &&
+                mark.marks_obtained >= 0 &&
+                mark.marks_obtained <= mark.max_marks))
+          ) {
             loadedMarks[mark.component] = {
               id: mark.id,
               marksObtained:
@@ -276,6 +287,7 @@ export default function SubjectDetailPage() {
           }
         }
         setMarks(loadedMarks);
+        setSavedMarks(loadedMarks);
 
         // 1b. Fetch semester details using subject's semester_id
         const { data: semesterData, error: semesterError } = await supabase
@@ -379,13 +391,18 @@ export default function SubjectDetailPage() {
 
     if (
       (marksObtained !== null &&
-        (!Number.isFinite(marksObtained) || marksObtained < 0)) ||
+        (!Number.isFinite(marksObtained) ||
+          marksObtained < 0 ||
+          marksObtained > maxMarks)) ||
       draft.maxMarks.trim() === "" ||
       !Number.isFinite(maxMarks) ||
-      maxMarks < 0 ||
-      (marksObtained !== null && marksObtained > maxMarks)
+      maxMarks <= 0
     ) {
-      toast.error("Marks obtained must be between 0 and the max marks.");
+      toast.error("Marks obtained must be between 0 and the max marks, and max marks must be greater than 0.");
+      setMarks((currentMarks) => ({
+        ...currentMarks,
+        [component]: savedMarks[component],
+      }));
       return;
     }
 
@@ -409,12 +426,19 @@ export default function SubjectDetailPage() {
       return;
     }
 
+    const savedMark = {
+      id: data?.id ?? savedMarks[component].id,
+      marksObtained:
+        marksObtained === null ? "" : String(marksObtained),
+      maxMarks: String(maxMarks),
+    };
+    setSavedMarks((currentMarks) => ({
+      ...currentMarks,
+      [component]: savedMark,
+    }));
     setMarks((currentMarks) => ({
       ...currentMarks,
-      [component]: {
-        ...currentMarks[component],
-        id: data?.id ?? currentMarks[component].id,
-      },
+      [component]: savedMark,
     }));
   }
 
@@ -470,7 +494,7 @@ export default function SubjectDetailPage() {
         )
       : 0;
 
-  const markValues = MARK_COMPONENTS.map(({ component }) => marks[component]);
+  const markValues = MARK_COMPONENTS.map(({ component }) => savedMarks[component]);
   const totalMarks = markValues.reduce(
     (total, mark) => total + (Number(mark.maxMarks) || 0),
     0
