@@ -27,6 +27,7 @@ create table public.subjects (
   name text not null,
   code text not null,
   min_attendance_percent numeric(5, 2) not null,
+  pass_percent numeric not null default 40,
   constraint subjects_code_unique unique (semester_id, code),
   constraint subjects_min_attendance_percent_check
     check (min_attendance_percent >= 0 and min_attendance_percent <= 100)
@@ -39,6 +40,16 @@ create table public.exams (
   date date not null,
   title text not null default 'Exam',
   created_at timestamptz default now()
+);
+
+create table public.marks (
+  id uuid primary key default gen_random_uuid(),
+  subject_id uuid not null references public.subjects (id) on delete cascade,
+  component text not null check (component in ('quiz1', 'midsem', 'quiz2', 'endsem')),
+  marks_obtained numeric,
+  max_marks numeric not null,
+  created_at timestamptz default now(),
+  unique (subject_id, component)
 );
 
 create table public.schedule_slots (
@@ -78,6 +89,7 @@ create index idx_holidays_semester_id on public.holidays (semester_id);
 create index idx_holidays_date on public.holidays (date);
 create index idx_exams_semester_id on public.exams (semester_id);
 create index idx_exams_subject_id on public.exams (subject_id);
+create index idx_marks_subject_id on public.marks (subject_id);
 create index idx_subjects_semester_id on public.subjects (semester_id);
 create index idx_day_overrides_slot_id on public.day_overrides (slot_id);
 create index idx_day_overrides_date on public.day_overrides (date);
@@ -129,6 +141,7 @@ $$;
 alter table public.semesters enable row level security;
 alter table public.holidays enable row level security;
 alter table public.exams enable row level security;
+alter table public.marks enable row level security;
 alter table public.subjects enable row level security;
 alter table public.schedule_slots enable row level security;
 alter table public.day_overrides enable row level security;
@@ -154,6 +167,31 @@ for all
 to authenticated
 using (public.is_semester_owner(semester_id))
 with check (public.is_semester_owner(semester_id));
+
+create policy "Users can view own marks"
+on public.marks
+for select
+to authenticated
+using (public.is_subject_owner(subject_id))
+
+create policy "Users can insert own marks"
+on public.marks
+for insert
+to authenticated
+with check (public.is_subject_owner(subject_id));
+
+create policy "Users can update own marks"
+on public.marks
+for update
+to authenticated
+using (public.is_subject_owner(subject_id))
+with check (public.is_subject_owner(subject_id));
+
+create policy "Users can delete own marks"
+on public.marks
+for delete
+to authenticated
+using (public.is_subject_owner(subject_id));
 
 create policy "authenticated users manage own subjects"
 on public.subjects

@@ -28,6 +28,18 @@ export interface Subject {
   name: string;
   code: string;
   min_attendance_percent: number;
+  pass_percent: number;
+}
+
+export type MarkComponent = "quiz1" | "midsem" | "quiz2" | "endsem";
+
+export interface Mark {
+  id: string;
+  subject_id: string;
+  component: MarkComponent;
+  marks_obtained: number | null;
+  max_marks: number;
+  created_at: string;
 }
 
 export interface ScheduleSlot {
