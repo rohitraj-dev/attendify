@@ -3308,8 +3308,8 @@ export default function DashboardPage() {
                 ) : (
                   <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-border sm:overflow-visible">
                     <div className="min-w-[960px] sm:min-w-0">
-                      <div className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))]">
-                        <div className="sticky left-0 z-30 border-r border-border bg-background" />
+                      <div className="grid w-full grid-cols-[64px_repeat(5,minmax(0,1fr))]">
+                        <div className="sticky left-0 z-30 w-16 border-r border-border bg-background" />
                         {weekDays.map((day) => {
                           const dateKey = formatLocalDateIso(day);
                           const dayExams = examsByDate.get(dateKey) ?? [];
@@ -3372,10 +3372,10 @@ export default function DashboardPage() {
                       </div>
 
                       <div
-                        className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))]"
+                        className="grid w-full grid-cols-[64px_repeat(5,minmax(0,1fr))]"
                         style={{ height: `${timelineHeight}px` }}
                       >
-                        <div className="sticky left-0 z-20 border-r border-border bg-background">
+                        <div className="sticky left-0 z-20 w-16 border-r border-border bg-background">
                           {timelineHours.map((hour) => {
                             if (hour >= 13 * 60 && hour < 15 * 60) {
                               return null;
@@ -3384,7 +3384,7 @@ export default function DashboardPage() {
                             return (
                               <span
                                 key={hour}
-                                className="absolute right-2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground"
+                                className="absolute right-2 whitespace-nowrap text-right text-[11px] font-medium text-muted-foreground"
                                 style={{ top: `${timelinePosition(hour)}px` }}
                               >
                                 {formatHourLabel(hour)}
@@ -3392,7 +3392,7 @@ export default function DashboardPage() {
                             );
                           })}
                           <span
-                            className="absolute right-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            className="absolute right-2 whitespace-nowrap text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
                             style={{
                               top: `${timelinePosition(13 * 60) + 8}px`,
                             }}
