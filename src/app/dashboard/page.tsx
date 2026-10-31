@@ -166,6 +166,8 @@ type AlertItem = {
   subjectName: string;
   type: "danger" | "warning";
   message: string;
+  minAttendancePercent: number;
+  canMiss: number;
 };
 
 type CalendarSlotRow = {
@@ -446,6 +448,7 @@ export default function DashboardPage() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [readAlerts, setReadAlerts] = useState<Set<string>>(new Set());
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
   const [displayedMonth, setDisplayedMonth] = useState(() => {
     const currentDate = new Date();
     return new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
@@ -1040,6 +1043,8 @@ export default function DashboardPage() {
             subjectName: subject.name,
             type: "danger",
             message: `${subject.name} is below minimum attendance (${subject.percentage}%)`,
+            minAttendancePercent: subject.minAttendancePercent,
+            canMiss: subject.canMiss,
           });
           continue;
         }
@@ -1054,6 +1059,8 @@ export default function DashboardPage() {
             subjectName: subject.name,
             type: "warning",
             message: `${subject.name} can only miss ${subject.canMiss} more class(es)`,
+            minAttendancePercent: subject.minAttendancePercent,
+            canMiss: subject.canMiss,
           });
         }
       }
@@ -2245,6 +2252,15 @@ export default function DashboardPage() {
   const selectedRescheduleClass = classes.find(
     (item) => item.id === rescheduleSlotId
   );
+  const activeAlerts = alerts
+    .filter((alert) => !dismissedAlerts.has(alert.subjectName))
+    .sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === "danger" ? -1 : 1;
+      }
+
+      return a.canMiss - b.canMiss;
+    });
   const unreadAlertCount = alerts.filter(
     (alert) => !readAlerts.has(getAlertKey(alert))
   ).length;
@@ -2636,40 +2652,6 @@ export default function DashboardPage() {
               </Card>
             ) : null}
 
-            {alerts
-              .filter((alert) => !dismissedAlerts.has(alert.subjectName))
-              .map((alert) => (
-                <div
-                  key={alert.subjectName}
-                  className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 ${
-                    alert.type === "danger"
-                      ? "border-red-200 bg-red-50 text-red-700"
-                      : "border-amber-200 bg-amber-50 text-amber-700"
-                  }`}
-                >
-                  <div className="min-w-0 flex items-start gap-2">
-                    <span className="text-sm">⚠</span>
-                    <p className="min-w-0 break-words text-sm font-medium">{alert.message}</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="shrink-0"
-                    aria-label="Dismiss alert"
-                    onClick={() =>
-                      setDismissedAlerts((current) => {
-                        const next = new Set(current);
-                        next.add(alert.subjectName);
-                        return next;
-                      })
-                    }
-                  >
-                    <X />
-                  </Button>
-                </div>
-              ))}
-
             {isLoading ? (
               <div className="grid gap-4">
                 {[1, 2].map((item) => (
@@ -2810,6 +2792,62 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             )}
+
+            {activeAlerts.length ? (
+              <Card className="gap-0 rounded-lg border-border py-0">
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium text-foreground outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+                  aria-expanded={isAlertsExpanded}
+                  onClick={() => setIsAlertsExpanded((current) => !current)}
+                >
+                  <span>⚠ {activeAlerts.length} alert{activeAlerts.length === 1 ? "" : "s"}</span>
+                  <ChevronDown
+                    className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                      isAlertsExpanded ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+                <div className="space-y-1 px-2 pb-2">
+                  {(isAlertsExpanded ? activeAlerts : activeAlerts.slice(0, 1)).map(
+                    (alert) => (
+                      <div
+                        key={alert.subjectName}
+                        className={`flex items-center justify-between gap-2 rounded-md border border-border/70 border-l-[3px] px-3 py-2 text-sm ${
+                          alert.type === "danger"
+                            ? "border-l-red-500 bg-red-500/10 text-red-700 dark:text-red-300"
+                            : "border-l-amber-500 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                        }`}
+                      >
+                        <p className="min-w-0 break-words font-medium">
+                          {alert.type === "danger"
+                            ? `${alert.subjectName} below ${alert.minAttendancePercent}%`
+                            : `${alert.subjectName}: ${alert.canMiss} miss${
+                                alert.canMiss === 1 ? "" : "es"
+                              } left`}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0"
+                          aria-label={`Dismiss ${alert.subjectName} alert`}
+                          onClick={() =>
+                            setDismissedAlerts((current) => {
+                              const next = new Set(current);
+                              next.add(alert.subjectName);
+                              return next;
+                            })
+                          }
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    )
+                  )}
+                </div>
+              </Card>
+            ) : null}
           </TabsContent>
 
           <TabsContent value="stats" className="space-y-4">
