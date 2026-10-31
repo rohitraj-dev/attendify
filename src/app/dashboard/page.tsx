@@ -294,6 +294,41 @@ function formatMinutesAsTime(totalMinutes: number) {
   return `${`${hours}`.padStart(2, "0")}:${`${minutes}`.padStart(2, "0")}:00`;
 }
 
+function formatHourLabel(totalMinutes: number) {
+  const date = new Date("1970-01-01T00:00:00");
+  date.setMinutes(totalMinutes);
+
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getWeekTimelinePosition(
+  totalMinutes: number,
+  timelineStart: number,
+  hourHeight: number,
+  lunchHeight: number
+) {
+  const lunchStart = 13 * 60;
+  const lunchEnd = 14 * 60 + 30;
+  const pixelsPerMinute = hourHeight / 60;
+
+  if (totalMinutes <= lunchStart) {
+    return (totalMinutes - timelineStart) * pixelsPerMinute;
+  }
+
+  if (totalMinutes <= lunchEnd) {
+    return (lunchStart - timelineStart) * pixelsPerMinute + lunchHeight;
+  }
+
+  return (
+    (lunchStart - timelineStart) * pixelsPerMinute +
+    lunchHeight +
+    (totalMinutes - lunchEnd) * pixelsPerMinute
+  );
+}
+
 function formatMonthLabel(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
@@ -2337,6 +2372,9 @@ export default function DashboardPage() {
       status: AttendanceStatus | "upcoming";
       timeRange: string;
       sortTime: number;
+      startTime: string;
+      endTime: string;
+      overrideType?: DayOverride["type"];
     }>
   >();
 
@@ -2373,12 +2411,43 @@ export default function DashboardPage() {
           status,
           timeRange: formatTimeRange(startTime, endTime),
           sortTime: timeToMinutes(startTime),
+          startTime,
+          endTime,
+          overrideType: override?.type,
         };
       })
       .sort((left, right) => left.sortTime - right.sortTime);
 
     weekClassByDate.set(dateKey, dayClasses);
   }
+
+  const weekTimelineClasses = Array.from(weekClassByDate.values()).flat();
+  const baseTimelineStart = weekTimelineClasses.length
+    ? Math.min(...weekTimelineClasses.map(({ startTime }) => timeToMinutes(startTime)))
+    : 8 * 60;
+  const baseTimelineEnd = weekTimelineClasses.length
+    ? Math.max(...weekTimelineClasses.map(({ endTime }) => timeToMinutes(endTime)))
+    : 17 * 60;
+  const timelineStart = Math.floor(Math.min(baseTimelineStart, 13 * 60) / 60) * 60;
+  const timelineEnd =
+    Math.ceil(Math.max(baseTimelineEnd, 15 * 60) / 60) * 60;
+  const timelineHourHeight = 72;
+  const lunchRowHeight = 30;
+  const timelineHours = Array.from(
+    { length: Math.max((timelineEnd - timelineStart) / 60, 1) },
+    (_, index) => timelineStart + index * 60
+  );
+  const timelineHeight =
+    (timelineEnd - timelineStart) * (timelineHourHeight / 60) +
+    lunchRowHeight -
+    90 * (timelineHourHeight / 60);
+  const timelinePosition = (minutes: number) =>
+    getWeekTimelinePosition(
+      minutes,
+      timelineStart,
+      timelineHourHeight,
+      lunchRowHeight
+    );
 
   function handleThemeToggle() {
     setIsDarkMode((current) => {
@@ -3234,116 +3303,186 @@ export default function DashboardPage() {
                   })}
                   </div>
                 ) : (
-                  <div className="grid gap-3 sm:grid-cols-5">
-                    {weekDays.map((day) => {
-                      const dateKey = formatLocalDateIso(day);
-                      const dayExams = examsByDate.get(dateKey) ?? [];
-                      const dayClasses = (weekClassByDate.get(dateKey) ?? []).filter(
-                        ({ item }) =>
-                          !dayExams.some((exam) => examAffectsSlot(exam, item))
-                      );
-                      const holidayReason = holidaySet.get(dateKey);
-                      const isToday = dateKey === localTodayIso;
+                  <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-border">
+                    <div className="min-w-[960px]">
+                      <div className="grid grid-cols-[76px_repeat(5,minmax(0,1fr))]">
+                        <div className="sticky left-0 z-30 border-r border-border bg-background" />
+                        {weekDays.map((day) => {
+                          const dateKey = formatLocalDateIso(day);
+                          const dayExams = examsByDate.get(dateKey) ?? [];
+                          const holidayReason = holidaySet.get(dateKey);
+                          const isToday = dateKey === localTodayIso;
 
-                      return (
-                        <div
-                          key={dateKey}
-                          className="min-w-0 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
-                        >
-                          <div
-                            className={`mb-3 rounded-lg px-2 py-2 ${
-                              isToday
-                                ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
-                                : "bg-zinc-50 dark:bg-zinc-950"
-                            }`}
-                          >
-                            <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
-                              {new Intl.DateTimeFormat("en-US", {
-                                weekday: "short",
-                              }).format(day)}
-                            </p>
-                            <p className="text-lg font-semibold">
-                              {new Intl.DateTimeFormat("en-US", {
-                                month: "short",
-                                day: "numeric",
-                              }).format(day)}
-                            </p>
-                          </div>
-
-                          {holidayReason ? (
-                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-950 dark:bg-amber-950/30 dark:text-amber-200">
-                              Holiday: {holidayReason}
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {dayExams.map((exam) => (
-                                <button
-                                  key={`${dateKey}-exam-${exam.id}`}
-                                  type="button"
-                                  className="flex min-h-11 w-full items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-left transition hover:shadow-sm dark:border-purple-950 dark:bg-purple-950/30"
-                                  onClick={() => setSelectedCalendarDate(dateKey)}
-                                >
-                                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-purple-500" />
-                                  <span className="min-w-0">
-                                    <span className="block truncate text-sm font-medium">
-                                      {exam.title}
-                                    </span>
-                                    <span className="block text-[11px] font-medium text-purple-700 dark:text-purple-300">
-                                      Exam
-                                      {exam.subject_id
-                                        ? ` · ${
-                                            subjectStats.find(
-                                              (subject) => subject.id === exam.subject_id
-                                            )?.name ?? "Subject"
-                                          }`
-                                        : " · All subjects"}
-                                    </span>
+                          return (
+                            <button
+                              key={dateKey}
+                              type="button"
+                              className={`min-w-0 border-b border-border px-2 py-3 text-left transition hover:bg-muted/60 ${
+                                isToday ? "bg-muted/70" : "bg-background"
+                              }`}
+                              onClick={() => setSelectedCalendarDate(dateKey)}
+                              aria-label={`Open details for ${formatDisplayDate(day)}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="min-w-0">
+                                  <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    {new Intl.DateTimeFormat("en-US", {
+                                      weekday: "short",
+                                    }).format(day)}
                                   </span>
-                                </button>
-                              ))}
-                              {dayClasses.map(({ item, status, timeRange }) => (
-                                <button
-                                  key={`${dateKey}-${item.id}`}
-                                  type="button"
-                                  className={`flex min-h-11 w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition hover:shadow-sm ${getWeekStatusClass(
-                                    status
-                                  )}`}
-                                  onClick={() => setSelectedCalendarDate(dateKey)}
-                                >
-                                  <span
-                                    className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
-                                      status === "present"
-                                        ? "bg-emerald-500"
-                                        : status === "absent"
-                                          ? "bg-red-500"
-                                          : status === "cancelled"
-                                            ? "bg-zinc-400"
-                                            : "bg-zinc-300"
-                                    }`}
-                                  />
-                                  <span className="min-w-0">
-                                    <span className="block truncate text-sm font-medium">
-                                      {item.subjectName}
-                                    </span>
-                                    <span className="block text-xs text-muted-foreground">
-                                      {timeRange}
-                                    </span>
-                                    <span className="block text-[11px] font-medium text-muted-foreground">
-                                      {getWeekStatusLabel(status)}
-                                    </span>
+                                  <span className="block text-sm font-semibold">
+                                    {new Intl.DateTimeFormat("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                    }).format(day)}
                                   </span>
-                                </button>
-                              ))}
-                              {!dayExams.length && !dayClasses.length ? (
-                                <p className="px-1 py-3 text-xs text-muted-foreground">
-                                  No classes
-                                </p>
+                                </span>
+                                <span className="flex shrink-0 items-center gap-1.5 pt-1">
+                                  {holidayReason ? (
+                                    <span
+                                      className="h-2.5 w-2.5 rounded-full bg-amber-500"
+                                      title={`Holiday: ${holidayReason}`}
+                                    />
+                                  ) : null}
+                                  {dayExams.length ? (
+                                    <span
+                                      className="h-2.5 w-2.5 rounded-full bg-purple-500"
+                                      title="Exam"
+                                    />
+                                  ) : null}
+                                </span>
+                              </div>
+                              {holidayReason ? (
+                                <span className="mt-1 block truncate text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                  Holiday · {holidayReason}
+                                </span>
+                              ) : dayExams.length ? (
+                                <span className="mt-1 block truncate text-[11px] font-medium text-purple-700 dark:text-purple-300">
+                                  {dayExams.length === 1
+                                    ? dayExams[0].title
+                                    : `${dayExams.length} exams`}
+                                </span>
                               ) : null}
-                            </div>
-                          )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div
+                        className="grid grid-cols-[76px_repeat(5,minmax(0,1fr))]"
+                        style={{ height: `${timelineHeight}px` }}
+                      >
+                        <div className="sticky left-0 z-20 border-r border-border bg-background">
+                          {timelineHours.map((hour) => {
+                            if (hour >= 13 * 60 && hour < 15 * 60) {
+                              return null;
+                            }
+
+                            return (
+                              <span
+                                key={hour}
+                                className="absolute right-2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground"
+                                style={{ top: `${timelinePosition(hour)}px` }}
+                              >
+                                {formatHourLabel(hour)}
+                              </span>
+                            );
+                          })}
+                          <span
+                            className="absolute right-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            style={{
+                              top: `${timelinePosition(13 * 60) + 8}px`,
+                            }}
+                          >
+                            Lunch
+                          </span>
                         </div>
-                      );
-                    })}
+
+                        {weekDays.map((day) => {
+                          const dateKey = formatLocalDateIso(day);
+                          const dayExams = examsByDate.get(dateKey) ?? [];
+                          const dayClasses = (weekClassByDate.get(dateKey) ?? []).filter(
+                            ({ item }) =>
+                              !dayExams.some((exam) => examAffectsSlot(exam, item))
+                          );
+                          const holidayReason = holidaySet.get(dateKey);
+
+                          return (
+                            <div
+                              key={dateKey}
+                              className="relative min-w-0 border-r border-border last:border-r-0"
+                            >
+                              {timelineHours.map((hour) => (
+                                <div
+                                  key={`${dateKey}-${hour}`}
+                                  className="absolute inset-x-0 border-t border-border/70"
+                                  style={{ top: `${timelinePosition(hour)}px` }}
+                                />
+                              ))}
+                              <div
+                                className="absolute inset-x-0 border-y border-border/70 bg-muted/60"
+                                style={{
+                                  top: `${timelinePosition(13 * 60)}px`,
+                                  height: `${lunchRowHeight}px`,
+                                }}
+                              />
+                              {holidayReason ? (
+                                <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-amber-200 bg-amber-50/95 px-2 py-1 text-[10px] font-medium text-amber-800 dark:border-amber-950 dark:bg-amber-950/90 dark:text-amber-200">
+                                  Holiday
+                                </div>
+                              ) : null}
+                              {dayClasses.map(
+                                ({
+                                  item,
+                                  status,
+                                  timeRange,
+                                  startTime,
+                                  endTime,
+                                  overrideType,
+                                }) => {
+                                  const top = timelinePosition(timeToMinutes(startTime));
+                                  const bottom = timelinePosition(timeToMinutes(endTime));
+                                  const height = Math.max(bottom - top, 54);
+
+                                  return (
+                                    <button
+                                      key={`${dateKey}-${item.id}`}
+                                      type="button"
+                                      className={`absolute inset-x-1 z-10 overflow-hidden rounded-lg border p-2 text-left text-xs shadow-sm transition hover:z-20 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${getWeekStatusClass(
+                                        status
+                                      )}`}
+                                      style={{ top: `${top}px`, height: `${height}px` }}
+                                      onClick={() => setSelectedCalendarDate(dateKey)}
+                                    >
+                                      <span className="block truncate font-semibold">
+                                        {item.subjectName}
+                                      </span>
+                                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                                        {item.subjectCode
+                                          ? `${item.subjectCode} · `
+                                          : ""}
+                                        {timeRange}
+                                      </span>
+                                      <span
+                                        className={`mt-1 block truncate text-[11px] font-medium ${
+                                          overrideType === "cancelled"
+                                            ? "line-through"
+                                            : ""
+                                        }`}
+                                      >
+                                        {overrideType === "rescheduled"
+                                          ? "Rescheduled"
+                                          : getWeekStatusLabel(status)}
+                                      </span>
+                                    </button>
+                                  );
+                                }
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
                 </div>
