@@ -88,6 +88,7 @@ export default function SetupPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [usePreset, setUsePreset] = useState(false);
   const [isSavingSemester, setIsSavingSemester] = useState(false);
+  const [isSavingActiveSemester, setIsSavingActiveSemester] = useState(false);
   const [isParsingTimetable, setIsParsingTimetable] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [isLoadingPresetHolidays, setIsLoadingPresetHolidays] = useState(false);
@@ -100,6 +101,10 @@ export default function SetupPage() {
   const [semesterStartDate, setSemesterStartDate] = useState("");
   const [semesterEndDate, setSemesterEndDate] = useState("");
   const [savedSemester, setSavedSemester] = useState<SemesterInsert | null>(null);
+  const [activeSemester, setActiveSemester] = useState<SemesterInsert | null>(null);
+  const [editSemesterName, setEditSemesterName] = useState("");
+  const [editSemesterStartDate, setEditSemesterStartDate] = useState("");
+  const [editSemesterEndDate, setEditSemesterEndDate] = useState("");
   const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
   const [presetBranch, setPresetBranch] = useState<string>("BCA");
   const [semesterNumber, setSemesterNumber] = useState<(typeof semesterNumbers)[number] | null>(null);
@@ -147,6 +152,60 @@ export default function SetupPage() {
 
     return () => window.cancelAnimationFrame(frameId);
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadActiveSemester() {
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user?.id) {
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("semesters")
+          .select("id, name, start_date, end_date")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (isMounted && data) {
+          const semester = data as SemesterInsert;
+          setActiveSemester(semester);
+          setEditSemesterName(semester.name);
+          setEditSemesterStartDate(semester.start_date);
+          setEditSemesterEndDate(semester.end_date);
+        }
+      } catch (error) {
+        if (isMounted) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to load active semester"
+          );
+        }
+      }
+    }
+
+    void loadActiveSemester();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase]);
 
   useEffect(() => {
     if (selectedBranch === "BCA") {
@@ -290,6 +349,10 @@ export default function SetupPage() {
       }
 
       setSavedSemester(data);
+      setActiveSemester(data);
+      setEditSemesterName(data.name);
+      setEditSemesterStartDate(data.start_date);
+      setEditSemesterEndDate(data.end_date);
       setCurrentStep(2);
       toast.success("Semester created");
     } catch (error) {
@@ -298,6 +361,66 @@ export default function SetupPage() {
       toast.error(message);
     } finally {
       setIsSavingSemester(false);
+    }
+  }
+
+  async function handleEditSemesterSubmit(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!activeSemester) {
+      return;
+    }
+
+    if (!editSemesterStartDate || !editSemesterEndDate) {
+      toast.error("Set both the semester start date and end date.");
+      return;
+    }
+
+    if (!editSemesterName.trim()) {
+      toast.error("Enter a semester name.");
+      return;
+    }
+
+    if (editSemesterStartDate > editSemesterEndDate) {
+      toast.error("The start date must be on or before the end date.");
+      return;
+    }
+
+    setIsSavingActiveSemester(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("semesters")
+        .update({
+          name: editSemesterName.trim(),
+          start_date: editSemesterStartDate,
+          end_date: editSemesterEndDate,
+        })
+        .eq("id", activeSemester.id)
+        .select("id, name, start_date, end_date")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const updatedSemester = data as SemesterInsert;
+      setActiveSemester(updatedSemester);
+      setSavedSemester((current) =>
+        current?.id === updatedSemester.id ? updatedSemester : current
+      );
+      setEditSemesterName(updatedSemester.name);
+      setEditSemesterStartDate(updatedSemester.start_date);
+      setEditSemesterEndDate(updatedSemester.end_date);
+      toast.success("Semester updated");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update semester"
+      );
+    } finally {
+      setIsSavingActiveSemester(false);
     }
   }
 
@@ -985,6 +1108,66 @@ export default function SetupPage() {
             </CardFooter>
           </Card>
         )}
+
+        {activeSemester ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Edit semester</CardTitle>
+              <CardDescription>
+                Update the active semester name and date range.
+              </CardDescription>
+            </CardHeader>
+            <form noValidate onSubmit={handleEditSemesterSubmit}>
+              <CardContent className="space-y-5">
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="edit-semester-name">Semester name</Label>
+                  <Input
+                    id="edit-semester-name"
+                    className="min-h-11 w-full"
+                    value={editSemesterName}
+                    onChange={(event) => setEditSemesterName(event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="edit-semester-start-date">Start date</Label>
+                    <Input
+                      id="edit-semester-start-date"
+                      type="date"
+                      className="min-h-11 w-full"
+                      value={editSemesterStartDate}
+                      onChange={(event) =>
+                        setEditSemesterStartDate(event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="edit-semester-end-date">End date</Label>
+                    <Input
+                      id="edit-semester-end-date"
+                      type="date"
+                      className="min-h-11 w-full"
+                      value={editSemesterEndDate}
+                      onChange={(event) =>
+                        setEditSemesterEndDate(event.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              </CardContent>
+              <CardFooter className="justify-end">
+                <Button
+                  type="submit"
+                  className="min-h-11 w-full sm:w-auto"
+                  disabled={isSavingActiveSemester}
+                >
+                  {isSavingActiveSemester ? "Saving..." : "Save changes"}
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+        ) : null}
 
         <Card className="border-red-200 dark:border-red-900/70">
           <CardHeader>
