@@ -71,6 +71,7 @@ import {
   MARK_COMPONENTS,
   TOTAL_MARKS,
 } from "@/lib/marks";
+import { formatLocalDateIso, isDateWithinRange } from "@/lib/date";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { AttendanceStatus, Exam, MarkComponent } from "@/lib/types";
 
@@ -205,14 +206,6 @@ type CalendarClass = {
 
 function getAlertKey(alert: AlertItem) {
   return `${alert.subjectName}:${alert.type}:${alert.message}`;
-}
-
-function formatLocalDateIso(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
 }
 
 function formatDisplayDate(date: Date) {
@@ -508,8 +501,8 @@ export default function DashboardPage() {
 
   const today = new Date();
   const todayDayOfWeek = today.getDay();
-  const todayIso = today.toISOString().split("T")[0];
-  const localTodayIso = formatLocalDateIso(today);
+  const todayIso = formatLocalDateIso(today);
+  const localTodayIso = todayIso;
   const headerDate = formatDisplayDate(today);
   const mobileHeaderDate = new Intl.DateTimeFormat("en-GB", {
     weekday: "short",
@@ -652,7 +645,14 @@ export default function DashboardPage() {
 
       hasAutoMarked.current = true;
 
-      if (!holidayDates.has(todayIso)) {
+      if (
+        isDateWithinRange(
+          todayIso,
+          activeSemester.start_date,
+          activeSemester.end_date
+        ) &&
+        !holidayDates.has(todayIso)
+      ) {
         const now = new Date();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const pastSlots = slots.filter((slot) => {
@@ -730,11 +730,15 @@ export default function DashboardPage() {
         const yesterdayDate = new Date(`${todayIso}T00:00:00`);
         yesterdayDate.setDate(yesterdayDate.getDate() - 1);
         const yesterdayIso = formatLocalDateIso(yesterdayDate);
+        const backfillEndIso =
+          yesterdayIso < activeSemester.end_date
+            ? yesterdayIso
+            : activeSemester.end_date;
 
-        if (activeSemester.start_date <= yesterdayIso) {
+        if (activeSemester.start_date <= backfillEndIso) {
           const pastDates: Array<{ dateIso: string; dayOfWeek: number }> = [];
           const currDate = new Date(`${activeSemester.start_date}T00:00:00`);
-          const endDate = new Date(`${yesterdayIso}T00:00:00`);
+          const endDate = new Date(`${backfillEndIso}T00:00:00`);
 
           while (currDate <= endDate) {
             const dow = currDate.getDay();
@@ -777,7 +781,7 @@ export default function DashboardPage() {
                 .select("slot_id, date")
                 .in("slot_id", allSlotIds)
                 .gte("date", activeSemester.start_date)
-                .lte("date", yesterdayIso);
+                .lte("date", backfillEndIso);
 
               if (existingErr) {
                 throw existingErr;
@@ -887,7 +891,11 @@ export default function DashboardPage() {
         .from("attendance_records")
         .select("slot_id, date, status")
         .in("slot_id", statSlotIds)
-        .lte("date", todayIso)
+        .gte("date", activeSemester.start_date)
+        .lte(
+          "date",
+          todayIso < activeSemester.end_date ? todayIso : activeSemester.end_date
+        )
         .neq("status", "cancelled");
 
       if (statAttendanceError) {
@@ -901,6 +909,7 @@ export default function DashboardPage() {
           .eq("type", "cancelled")
           .in("slot_id", statSlotIds)
           .gt("date", todayIso)
+          .gte("date", activeSemester.start_date)
           .lte("date", activeSemester.end_date);
 
       if (futureCancelledOverridesError) {
@@ -964,10 +973,14 @@ export default function DashboardPage() {
           let remainingClasses = 0;
 
           const futureDate = new Date(`${todayIso}T00:00:00`);
-          futureDate.setHours(0, 0, 0, 0);
           futureDate.setDate(futureDate.getDate() + 1);
+          const semesterStartDate = new Date(
+            `${activeSemester.start_date}T00:00:00`
+          );
+          if (futureDate < semesterStartDate) {
+            futureDate.setTime(semesterStartDate.getTime());
+          }
           const semesterEndDate = new Date(`${activeSemester.end_date}T00:00:00`);
-          semesterEndDate.setHours(0, 0, 0, 0);
 
           while (futureDate <= semesterEndDate) {
             const isoDate = formatLocalDateIso(futureDate);
@@ -1281,6 +1294,18 @@ export default function DashboardPage() {
         );
         await loadStats(semester, holidayDates, semesterExams);
 
+        if (
+          !isDateWithinRange(
+            todayIso,
+            semester.start_date,
+            semester.end_date
+          )
+        ) {
+          setClasses([]);
+          setOverrides({});
+          return;
+        }
+
         const { data: attendanceRows, error: attendanceError } = await supabase
           .from("attendance_records")
           .select("slot_id, status")
@@ -1424,6 +1449,14 @@ export default function DashboardPage() {
         const weekEndIso = formatLocalDateIso(weekEnd);
         const rangeStartIso = monthStartIso < weekStartIso ? monthStartIso : weekStartIso;
         const rangeEndIso = monthEndIso > weekEndIso ? monthEndIso : weekEndIso;
+        const attendanceRangeStartIso =
+          rangeStartIso < activeSemester.start_date
+            ? activeSemester.start_date
+            : rangeStartIso;
+        const attendanceRangeEndIso =
+          rangeEndIso > activeSemester.end_date
+            ? activeSemester.end_date
+            : rangeEndIso;
 
         const { data: examRows, error: examsError } = await supabase
           .from("exams")
@@ -1448,8 +1481,8 @@ export default function DashboardPage() {
           .from("attendance_records")
           .select("slot_id, date, status")
           .in("slot_id", slotIds)
-          .gte("date", rangeStartIso)
-          .lte("date", rangeEndIso);
+          .gte("date", attendanceRangeStartIso)
+          .lte("date", attendanceRangeEndIso);
 
         if (attendanceError) {
           throw attendanceError;
@@ -1673,7 +1706,16 @@ export default function DashboardPage() {
   async function handleToggleAttendance(slotId: string) {
     const currentClass = classes.find((item) => item.id === slotId);
 
-    if (!currentClass || currentClass.overrideType === "cancelled") {
+    if (
+      !currentClass ||
+      currentClass.overrideType === "cancelled" ||
+      !activeSemester ||
+      !isDateWithinRange(
+        todayIso,
+        activeSemester.start_date,
+        activeSemester.end_date
+      )
+    ) {
       return;
     }
 
@@ -1719,7 +1761,13 @@ export default function DashboardPage() {
   }
 
   async function handleCalendarToggle(slotId: string, date: string, currentStatus: AttendanceStatus | null) {
-    if (currentStatus === "cancelled") return;
+    if (
+      currentStatus === "cancelled" ||
+      !activeSemester ||
+      !isDateWithinRange(date, activeSemester.start_date, activeSemester.end_date)
+    ) {
+      return;
+    }
     const nextStatus: AttendanceStatus = currentStatus === "present" ? "absent" : "present";
     setPendingCalendarSlotIds((prev) => [...prev, slotId]);
     try {
@@ -1745,6 +1793,13 @@ export default function DashboardPage() {
   }
 
   async function handleCalendarCancelClass(slotId: string, date: string) {
+    if (
+      !activeSemester ||
+      !isDateWithinRange(date, activeSemester.start_date, activeSemester.end_date)
+    ) {
+      return;
+    }
+
     setPendingCalendarSlotIds((prev) => [...prev, slotId]);
     try {
       const { error: overrideError } = await supabase
@@ -1791,6 +1846,13 @@ export default function DashboardPage() {
   }
 
   async function handleCalendarUncancelClass(slotId: string, date: string) {
+    if (
+      !activeSemester ||
+      !isDateWithinRange(date, activeSemester.start_date, activeSemester.end_date)
+    ) {
+      return;
+    }
+
     setPendingCalendarSlotIds((prev) => [...prev, slotId]);
     try {
       const { error: deleteError } = await supabase
@@ -1991,7 +2053,15 @@ export default function DashboardPage() {
   async function handleCancelClass(slotId: string) {
     const targetClass = classes.find((item) => item.id === slotId);
 
-    if (!targetClass) {
+    if (
+      !targetClass ||
+      !activeSemester ||
+      !isDateWithinRange(
+        todayIso,
+        activeSemester.start_date,
+        activeSemester.end_date
+      )
+    ) {
       return;
     }
 
@@ -2184,6 +2254,9 @@ export default function DashboardPage() {
     if (!bulkConfirmAction || !selectedBulkDates.size) {
       return;
     }
+    if (!activeSemester) {
+      return;
+    }
 
     setIsBulkSaving(true);
 
@@ -2196,6 +2269,16 @@ export default function DashboardPage() {
       }> = [];
 
       for (const date of selectedBulkDates) {
+        if (
+          !isDateWithinRange(
+            date,
+            activeSemester.start_date,
+            activeSemester.end_date
+          )
+        ) {
+          continue;
+        }
+
         const dayOfWeek = new Date(`${date}T00:00:00`).getDay();
         const dayExams = examsByDate.get(date) ?? [];
 
@@ -2286,13 +2369,27 @@ export default function DashboardPage() {
   }
   const selectedAcademicHoliday = selectedAcademicDate ? holidaySet.get(selectedAcademicDate) : null;
   const isSemesterDay = (dateIso: string) => {
-    if (!activeSemester) return false;
-    return dateIso >= activeSemester.start_date && (!activeSemester.end_date || dateIso <= activeSemester.end_date);
+    return activeSemester
+      ? isDateWithinRange(
+          dateIso,
+          activeSemester.start_date,
+          activeSemester.end_date
+        )
+      : false;
   };
   const attendanceBySlotDate = new Map<string, AttendanceStatus>();
 
   for (const record of calendarAttendance) {
-    attendanceBySlotDate.set(`${record.date}:${record.slot_id}`, record.status);
+    if (
+      activeSemester &&
+      isDateWithinRange(
+        record.date,
+        activeSemester.start_date,
+        activeSemester.end_date
+      )
+    ) {
+      attendanceBySlotDate.set(`${record.date}:${record.slot_id}`, record.status);
+    }
   }
 
   const selectedCalendarDateObject = selectedCalendarDate
@@ -2311,6 +2408,8 @@ export default function DashboardPage() {
       .filter((dateKey) => {
         const date = new Date(`${dateKey}T00:00:00`);
         return (
+          activeSemester !== null &&
+          isDateWithinRange(dateKey, activeSemester.start_date, activeSemester.end_date) &&
           date.getMonth() === displayedMonth.getMonth() &&
           date.getFullYear() === displayedMonth.getFullYear() &&
           dateKey <= localTodayIso &&
@@ -2328,7 +2427,15 @@ export default function DashboardPage() {
   const overrideBySlotDate = new Map<string, CalendarOverride>();
 
   for (const record of calendarAttendance) {
-    if (!filteredCalendarSlotIds.has(record.slot_id)) {
+    if (
+      !filteredCalendarSlotIds.has(record.slot_id) ||
+      !activeSemester ||
+      !isDateWithinRange(
+        record.date,
+        activeSemester.start_date,
+        activeSemester.end_date
+      )
+    ) {
       continue;
     }
 
@@ -2341,7 +2448,14 @@ export default function DashboardPage() {
     overrideBySlotDate.set(`${override.date}:${override.slot_id}`, override);
   }
 
-  const selectedCalendarClasses = selectedCalendarDateObject
+  const selectedCalendarClasses = selectedCalendarDateObject &&
+    selectedCalendarDate &&
+    activeSemester &&
+    isDateWithinRange(
+      selectedCalendarDate,
+      activeSemester.start_date,
+      activeSemester.end_date
+    )
     ? calendarClasses
         .filter(
           (item) =>
@@ -2396,7 +2510,15 @@ export default function DashboardPage() {
 
   for (const day of weekDays) {
     const dateKey = formatLocalDateIso(day);
-    if (holidaySet.has(dateKey)) {
+    if (
+      !activeSemester ||
+      !isDateWithinRange(
+        dateKey,
+        activeSemester.start_date,
+        activeSemester.end_date
+      ) ||
+      holidaySet.has(dateKey)
+    ) {
       continue;
     }
 
@@ -3279,7 +3401,9 @@ export default function DashboardPage() {
                     const isCurrentMonth =
                       day.getMonth() === displayedMonth.getMonth() &&
                       day.getFullYear() === displayedMonth.getFullYear();
-                    const dayRecords = filteredAttendanceByDate.get(dateKey) ?? [];
+                    const dayRecords = isSemesterDay(dateKey)
+                      ? filteredAttendanceByDate.get(dateKey) ?? []
+                      : [];
                     const isHoliday = holidaySet.has(dateKey);
                     const isSelected = selectedCalendarDate === dateKey;
                     const isBulkSelected = selectedBulkDates.has(dateKey);

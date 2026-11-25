@@ -30,6 +30,7 @@ import {
   calculateMarkSummary,
   MARK_COMPONENTS,
 } from "@/lib/marks";
+import { formatLocalDateIso } from "@/lib/date";
 import { createBrowserSupabaseClient } from "@/lib/supabase-browser";
 import type { MarkComponent } from "@/lib/types";
 import { toast } from "sonner";
@@ -330,6 +331,8 @@ export default function SubjectDetailPage() {
               .from("attendance_records")
               .select("slot_id, date, status")
               .in("slot_id", slotIds)
+              .gte("date", semesterData.start_date)
+              .lte("date", semesterData.end_date)
               .order("date", { ascending: false }),
             supabase
               .from("day_overrides")
@@ -554,10 +557,7 @@ export default function SubjectDetailPage() {
     while (current <= endDate) {
       const dow = current.getDay();
       if (dow !== 0 && dow !== 6) {
-        const year = current.getFullYear();
-        const month = String(current.getMonth() + 1).padStart(2, "0");
-        const day = String(current.getDate()).padStart(2, "0");
-        const isoDate = `${year}-${month}-${day}`;
+        const isoDate = formatLocalDateIso(current);
 
         for (const slot of scheduleSlots) {
           if (slot.day_of_week === dow) {
